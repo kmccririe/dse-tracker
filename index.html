@@ -394,11 +394,30 @@ const saveCustomers = d => localStorage.setItem(CKEY, JSON.stringify(d));
 const loadEntries   = () => { try { return JSON.parse(localStorage.getItem(EKEY)) || []; } catch { return []; } };
 const saveEntries   = d => { localStorage.setItem(EKEY, JSON.stringify(d)); _scheduleFileWrite(); };
 const loadUpdates   = () => { try { return JSON.parse(localStorage.getItem(UKEY)) || []; } catch { return []; } };
-const saveUpdates   = d => localStorage.setItem(UKEY, JSON.stringify(d));
+const saveUpdates   = d => { localStorage.setItem(UKEY, JSON.stringify(d)); _scheduleFileWrite(); };
+
+// IDs used by the old default placeholder customers — never real data
+const PLACEHOLDER_IDS = new Set(['cust_a', 'cust_b']);
 
 function initCustomers() {
-  if (loadCustomers()) return;
-  // Migrate old hardcoded ATT/JPMC entries if present
+  const existing = loadCustomers();
+
+  // Purge placeholder customers that have no real data attached
+  if (existing) {
+    const entries = loadEntries();
+    const updates = loadUpdates();
+    const cleaned = existing.filter(c => {
+      if (!PLACEHOLDER_IDS.has(c.id)) return true;
+      // Keep if user actually stored data against this id
+      return entries.some(e => e.customer === c.id) || updates.some(u => u.customer === c.id);
+    });
+    if (cleaned.length !== existing.length) {
+      saveCustomers(cleaned);
+    }
+    return;
+  }
+
+  // First ever load — migrate old hardcoded ATT/JPMC entries if present
   const entries = loadEntries();
   const hasAtt  = entries.some(e => e.customer === 'ATT');
   const hasJpmc = entries.some(e => e.customer === 'JPMC');
@@ -408,7 +427,7 @@ function initCustomers() {
     if (hasJpmc) cx.push({ id: 'JPMC', name: 'JPMC', color: '#60a5fa' });
     saveCustomers(cx);
   } else {
-    saveCustomers([]); // start empty — user adds their own
+    saveCustomers([]); // start empty
   }
 }
 
