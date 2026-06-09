@@ -1,7 +1,8 @@
 #!/bin/bash
-# Serves DSE Tracker on localhost so Aperture CORS works.
+# Starts the DSE Tracker server with Aperture routing.
+# AI calls go server-side (no CORS issues).
 PORT=${1:-8080}
-echo "DSE Tracker → http://localhost:$PORT"
-echo "Press Ctrl+C to stop."
 cd "$(dirname "$0")"
-python3 -m http.server $PORT
+ANTHROPIC_BEDROCK_BASE_URL=http://ai/bedrock \
+ANTHROPIC_MODEL=us.anthropic.claude-opus-4-6-v1 \
+node server.js $PORT
