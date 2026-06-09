@@ -396,14 +396,9 @@ const saveEntries   = d => { localStorage.setItem(EKEY, JSON.stringify(d)); _sch
 const loadUpdates   = () => { try { return JSON.parse(localStorage.getItem(UKEY)) || []; } catch { return []; } };
 const saveUpdates   = d => localStorage.setItem(UKEY, JSON.stringify(d));
 
-const DEFAULT_CUSTOMERS = [
-  { id: 'cust_a', name: 'Customer A', color: '#00a8e0' },
-  { id: 'cust_b', name: 'Customer B', color: '#a78bfa' },
-];
-
 function initCustomers() {
   if (loadCustomers()) return;
-  // Detect existing ATT/JPMC data and preserve it
+  // Migrate old hardcoded ATT/JPMC entries if present
   const entries = loadEntries();
   const hasAtt  = entries.some(e => e.customer === 'ATT');
   const hasJpmc = entries.some(e => e.customer === 'JPMC');
@@ -413,7 +408,7 @@ function initCustomers() {
     if (hasJpmc) cx.push({ id: 'JPMC', name: 'JPMC', color: '#60a5fa' });
     saveCustomers(cx);
   } else {
-    saveCustomers([...DEFAULT_CUSTOMERS]);
+    saveCustomers([]); // start empty — user adds their own
   }
 }
 
@@ -443,8 +438,7 @@ function _scheduleFileWrite(cx) {
 const FS_SUPPORTED = ('showDirectoryPicker' in window);
 const IDB_NAME     = 'dse_tracker_fs';
 const IDB_STORE    = 'handles';
-const IDB_KEY      = 'dir_handle';
-let   dirHandle    = null;   // in-memory once loaded
+const dirHandles   = {};   // { [customerId]: FileSystemDirectoryHandle }
 
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 function openIDB() {
@@ -483,56 +477,52 @@ async function idbDel(key) {
   });
 }
 
-// Load persisted handle and re-request permission if needed (called at boot)
-async function initDirHandle() {
-  try {
-    const saved = await idbGet(IDB_KEY);
-    if (!saved) return;
-    // Check/request permission without prompting (queryPermission)
-    const perm = await saved.queryPermission({ mode: 'readwrite' });
-    if (perm === 'granted') { dirHandle = saved; renderDirBar(); }
-    else { dirHandle = saved; renderDirBar(); } // show "click to re-grant"
-  } catch { /* IDB or handle gone */ }
+// Load all persisted handles at boot
+async function initDirHandles() {
+  const customers = loadCustomers() || [];
+  await Promise.all(customers.map(async c => {
+    try {
+      const saved = await idbGet('dir_' + c.id);
+      if (saved) dirHandles[c.id] = saved;
+    } catch {}
+  }));
 }
 
-async function pickDirectory() {
+async function pickDirectoryForCustomer(cxId) {
   if (!FS_SUPPORTED) { toast('Directory picker not supported — use Chrome or Edge.'); return; }
   try {
-    const h = await window.showDirectoryPicker({ id: 'dse-tracker', mode: 'readwrite', startIn: 'documents' });
-    dirHandle = h;
-    await idbSet(IDB_KEY, h);
+    const h = await window.showDirectoryPicker({ id: 'dse-dir-' + cxId, mode: 'readwrite', startIn: 'documents' });
+    dirHandles[cxId] = h;
+    await idbSet('dir_' + cxId, h);
     renderDirBar();
     renderSettingsModal();
-    await writeAllFiles();
-    toast(`Folder linked: ${h.name} — auto-syncing all customers`);
+    await writeCustomerFiles(cxId);
+    toast(`Folder linked for ${(loadCustomers()||[]).find(c=>c.id===cxId)?.name || cxId}: ${h.name}/`);
   } catch (e) {
     if (e.name !== 'AbortError') toast('Could not open folder: ' + e.message);
   }
 }
 
-async function unlinkDirectory() {
-  dirHandle = null;
-  await idbDel(IDB_KEY);
+async function unlinkDirectoryForCustomer(cxId) {
+  delete dirHandles[cxId];
+  await idbDel('dir_' + cxId);
   renderDirBar();
   renderSettingsModal();
   toast('Folder unlinked');
 }
 
-// Ensure we have write permission (may show browser permission prompt)
-async function ensurePermission() {
-  if (!dirHandle) return false;
-  const perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+async function ensurePermission(handle) {
+  if (!handle) return false;
+  const perm = await handle.queryPermission({ mode: 'readwrite' });
   if (perm === 'granted') return true;
-  const req = await dirHandle.requestPermission({ mode: 'readwrite' });
-  return req === 'granted';
+  return (await handle.requestPermission({ mode: 'readwrite' })) === 'granted';
 }
 
-// Write a single file into the linked directory
-async function writeFile(filename, content) {
-  if (!dirHandle) return;
-  if (!(await ensurePermission())) { toast('Permission denied — re-link folder in Settings.'); return; }
+async function writeFile(handle, filename, content) {
+  if (!handle) return;
+  if (!(await ensurePermission(handle))) { toast('Permission denied — re-link folder in Settings.'); return; }
   try {
-    const fh = await dirHandle.getFileHandle(filename, { create: true });
+    const fh = await handle.getFileHandle(filename, { create: true });
     const w  = await fh.createWritable();
     await w.write(content);
     await w.close();
@@ -559,39 +549,42 @@ function buildTimelogCSV(cx) {
   return rows.map(r => r.join(',')).join('\n');
 }
 
-// Write both files for one customer
+// Write both files for one customer into their linked folder
 async function writeCustomerFiles(cx) {
-  if (!dirHandle) return;
+  const handle = dirHandles[cx];
+  if (!handle) return;
   const cust = (loadCustomers()||[]).find(c => c.id === cx);
   const slug = slugify(cust ? cust.name : cx);
   await Promise.all([
-    writeFile(`${slug}-profile.md`,  buildProfileMarkdown(cx)),
-    writeFile(`${slug}-timelog.csv`, buildTimelogCSV(cx)),
+    writeFile(handle, `${slug}-profile.md`,  buildProfileMarkdown(cx)),
+    writeFile(handle, `${slug}-timelog.csv`, buildTimelogCSV(cx)),
   ]);
 }
 
-// Write files for all customers
 async function writeAllFiles() {
   const customers = loadCustomers() || [];
   await Promise.all(customers.map(c => writeCustomerFiles(c.id)));
 }
 
-// ── Dir bar (shown in Profile tab) ───────────────────────────────────────────
+// ── Dir bar (shown in Profile tab for active customer) ────────────────────────
 function renderDirBar() {
   const el = document.getElementById('profile-dir-bar');
   if (!el) return;
-  const linked = !!dirHandle;
-  el.innerHTML = linked
+  const handle = dirHandles[CX];
+  const cust   = (loadCustomers()||[]).find(c => c.id === CX);
+  const slug   = slugify(cust ? cust.name : CX);
+  el.innerHTML = handle
     ? `<div class="dir-bar linked">
         <span class="dir-dot"></span>
-        <span class="dir-bar-label">Syncing to <strong>${dirHandle.name}/</strong> &nbsp;·&nbsp; writes <code>{customer}-profile.md</code> and <code>{customer}-timelog.csv</code></span>
-        <button class="btn-pick-dir" onclick="pickDirectory()">Change</button>
-        <button class="btn-ghost btn-sm" onclick="unlinkDirectory()" style="font-size:12px">Unlink</button>
+        <span class="dir-bar-label">Syncing to <strong>${handle.name}/</strong> &nbsp;·&nbsp;
+          <code>${slug}-profile.md</code> &amp; <code>${slug}-timelog.csv</code></span>
+        <button class="btn-pick-dir" onclick="pickDirectoryForCustomer('${CX}')">Change</button>
+        <button class="btn-ghost btn-sm" onclick="unlinkDirectoryForCustomer('${CX}')" style="font-size:12px">Unlink</button>
       </div>`
     : `<div class="dir-bar">
         <span class="dir-dot"></span>
-        <span class="dir-bar-label">No folder linked — profiles and timelogs won't be saved to disk</span>
-        <button class="btn-pick-dir" onclick="pickDirectory()">Choose Folder</button>
+        <span class="dir-bar-label">No folder linked for this customer — files won't be saved to disk</span>
+        <button class="btn-pick-dir" onclick="pickDirectoryForCustomer('${CX}')">Choose Folder</button>
       </div>`;
 }
 
@@ -708,28 +701,46 @@ function renderSettingsModal() {
   const customers = loadCustomers() || [];
   const root = document.getElementById('modal-root');
   root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeSettings()">
-    <div class="modal">
+    <div class="modal" style="width:480px">
       <div class="modal-header">
-        <h3>Manage Customers</h3>
+        <h3>Customers</h3>
         <button class="modal-close" onclick="closeSettings()">✕</button>
       </div>
 
-      <div class="modal-section-label">Current customers</div>
-      <div class="cx-list">
-        ${customers.length === 0 ? '<div style="font-size:12px;color:var(--muted);padding:8px 0">No customers yet.</div>' :
-          customers.map(c => {
-            const eCount = loadEntries().filter(e => e.customer === c.id).length;
-            const uCount = loadUpdates().filter(u => u.customer === c.id).length;
-            return `<div class="cx-list-row">
-              <span class="cx-swatch" style="background:${c.color}"></span>
-              <span class="cx-list-name">${esc(c.name)}</span>
-              <span class="cx-list-count">${eCount} entr${eCount===1?'y':'ies'}, ${uCount} update${uCount===1?'':'s'}</span>
-              ${customers.length > 1
-                ? `<button class="btn-danger" onclick="removeCustomer('${escAttr(c.id)}')" title="Remove">✕</button>`
-                : `<span style="font-size:11px;color:var(--muted)">(last)</span>`}
-            </div>`;
-          }).join('')}
-      </div>
+      ${customers.length === 0
+        ? `<div style="text-align:center;padding:20px 0 16px;color:var(--muted)">
+            <div style="font-size:28px;margin-bottom:8px">👤</div>
+            <div style="font-size:14px;color:var(--text);font-weight:600;margin-bottom:6px">No customers yet</div>
+            <div style="font-size:12px;line-height:1.5">Add your first customer below to get started.</div>
+          </div>`
+        : `<div class="modal-section-label">Your customers</div>
+           <div class="cx-list">
+             ${customers.map(c => {
+               const eCount  = loadEntries().filter(e => e.customer === c.id).length;
+               const uCount  = loadUpdates().filter(u => u.customer === c.id).length;
+               const handle  = dirHandles[c.id];
+               const slug    = slugify(c.name);
+               return `<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-bottom:6px">
+                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                   <span class="cx-swatch" style="background:${c.color}"></span>
+                   <span style="font-size:14px;font-weight:600;flex:1">${esc(c.name)}</span>
+                   <span style="font-size:11px;color:var(--muted)">${eCount} entr${eCount===1?'y':'ies'} · ${uCount} update${uCount===1?'':'s'}</span>
+                   ${customers.length > 1
+                     ? `<button class="btn-danger" onclick="removeCustomer('${escAttr(c.id)}')" title="Remove">✕</button>`
+                     : ''}
+                 </div>
+                 <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+                   ${handle
+                     ? `<span style="color:var(--green);flex:1">● Syncing to <strong>${handle.name}/</strong>
+                          &nbsp;<code>${slug}-profile.md</code> &amp; <code>${slug}-timelog.csv</code></span>
+                        <button class="btn-pick-dir btn-sm" onclick="pickDirectoryForCustomer('${escAttr(c.id)}')">Change</button>
+                        <button class="btn-ghost btn-sm" onclick="unlinkDirectoryForCustomer('${escAttr(c.id)}')">Unlink</button>`
+                     : `<span style="color:var(--muted);flex:1">○ No folder linked — files won't be saved to disk</span>
+                        <button class="btn-pick-dir" onclick="pickDirectoryForCustomer('${escAttr(c.id)}')">Choose Folder</button>`}
+                 </div>
+               </div>`;
+             }).join('')}
+           </div>`}
 
       <hr class="modal-divider">
       <div class="modal-section-label">Add a customer</div>
@@ -745,37 +756,6 @@ function renderSettingsModal() {
         </div>
         <button class="btn-primary" onclick="addCustomer()">Add</button>
       </div>
-
-      <hr class="modal-divider">
-      <div class="modal-section-label">Data &amp; files</div>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5">
-        Link a folder on disk. The app writes <code>{customer}-profile.md</code> and
-        <code>{customer}-timelog.csv</code> there automatically on every change.
-        ${!FS_SUPPORTED ? '<br><strong style="color:var(--yellow)">⚠ Requires Chrome or Edge.</strong>' : ''}
-      </p>
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg)">
-        <span style="font-size:13px;flex:1">
-          ${dirHandle
-            ? `<span style="color:var(--green)">●</span> <strong>${dirHandle.name}/</strong> linked`
-            : `<span style="color:var(--muted)">○</span> No folder linked`}
-        </span>
-        <button class="btn-pick-dir" onclick="pickDirectory()">
-          ${dirHandle ? 'Change Folder' : 'Choose Folder'}
-        </button>
-        ${dirHandle ? `<button class="btn-ghost btn-sm" onclick="unlinkDirectory()" style="font-size:12px">Unlink</button>` : ''}
-      </div>
-      ${dirHandle ? `
-      <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">
-        ${(loadCustomers()||[]).map(c => {
-          const slug = slugify(c.name);
-          return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)">
-            <span class="cx-swatch" style="background:${c.color};width:10px;height:10px;border-radius:2px"></span>
-            <span style="flex:1">${esc(c.name)}</span>
-            <code>${slug}-profile.md</code>
-            <code style="margin-left:4px">${slug}-timelog.csv</code>
-          </div>`;
-        }).join('')}
-      </div>` : ''}
     </div>
   </div>`;
   setTimeout(() => document.getElementById('new-cx-name')?.focus(), 50);
@@ -786,12 +766,18 @@ function addCustomer() {
   const color = document.getElementById('new-cx-color').value || '#4f6bff';
   if (!name) { toast('Enter a customer name.'); return; }
   const customers = loadCustomers() || [];
-  const id = 'cust_' + Date.now();
+  const id        = 'cust_' + Date.now();
+  const isFirst   = customers.length === 0;
   pushUndo();
   customers.push({ id, name, color });
   saveCustomers(customers);
   renderSwitcher();
-  renderSettingsModal();
+  setCustomer(id);
+  if (isFirst) {
+    closeSettings(); // first customer added — enter the app
+  } else {
+    renderSettingsModal();
+  }
   toast(`Added "${name}"`);
 }
 
@@ -811,12 +797,18 @@ function removeCustomer(id) {
   saveEntries(loadEntries().filter(e => e.customer !== id));
   saveUpdates(loadUpdates().filter(u => u.customer !== id));
   // Switch to another customer if we removed the active one
+  const remaining = loadCustomers() || [];
   if (CX === id) {
-    const remaining = loadCustomers() || [];
     if (remaining.length) setCustomer(remaining[0].id);
+    else CX = null;
   }
   renderSwitcher();
-  renderSettingsModal();
+  if (remaining.length === 0) {
+    // Removed last customer — reopen setup modal locked
+    openSettings();
+  } else {
+    renderSettingsModal();
+  }
   toast(`Removed "${cust?.name}"`);
 }
 
@@ -1379,11 +1371,19 @@ function renderProfile() {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 initCustomers();
-document.getElementById('modal-root').style.display = 'none';
 document.getElementById('in-date').value = today();
-const firstCx = (loadCustomers()||[])[0];
-if (firstCx) setCustomer(firstCx.id);
-initDirHandle().then(() => renderDirBar());
+const _bootCustomers = loadCustomers() || [];
+if (_bootCustomers.length === 0) {
+  // No customers yet — open setup modal immediately, can't be dismissed
+  document.getElementById('modal-root').style.display = '';
+  renderSettingsModal();
+  // Remove the overlay click-to-close behaviour until first customer added
+  document.querySelector('.modal-overlay')?.setAttribute('onclick', '');
+} else {
+  document.getElementById('modal-root').style.display = 'none';
+  setCustomer(_bootCustomers[0].id);
+}
+initDirHandles().then(() => { renderDirBar(); renderSettingsModal && null; });
 </script>
 </body>
 </html>
