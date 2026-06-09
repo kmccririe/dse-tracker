@@ -23,11 +23,17 @@ A zero-install, single-file time tracker for Dedicated Support Engineers (or any
 
 ## Usage
 
-### Open locally
+### Open locally (basic)
 ```
-open index.html   # macOS
+open index.html
 ```
-Or just double-click `index.html`. Works in any modern browser. Chrome/Edge required for the profile file sync feature.
+Works for everything except the AI Status feature, which requires a proper HTTP origin (not `file://`).
+
+### Open locally with AI Status (Aperture / localhost)
+```
+./serve.sh        # starts http://localhost:8080
+```
+Then open `http://localhost:8080` in your browser. The Status tab will show **Connected via Aperture** and route AI calls through `http://ai/bedrock` with no API key needed.
 
 ### Host on GitHub Pages
 1. Fork or push this repo to GitHub
