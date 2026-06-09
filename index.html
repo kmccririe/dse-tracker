@@ -212,6 +212,46 @@
   .empty { text-align: center; padding: 44px 16px; color: var(--muted); }
   .empty strong { display: block; margin-bottom: 4px; font-size: 14px; color: var(--text); }
 
+  /* ── Status page ── */
+  .status-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .health-badge { display: inline-flex; align-items: center; gap: 7px; padding: 5px 14px; border-radius: 99px; font-size: 13px; font-weight: 700; border: 1.5px solid; }
+  .health-green  { background: rgba(34,197,94,.1);  border-color: rgba(34,197,94,.35); color: #22c55e; }
+  .health-yellow { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.35); color: #f59e0b; }
+  .health-red    { background: rgba(239,68,68,.1);  border-color: rgba(239,68,68,.35);  color: #ef4444; }
+  .health-dot    { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .status-evaluated { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .btn-evaluate { background: rgba(var(--cx-rgb),.15); color: var(--cx-color); border: 1px solid rgba(var(--cx-rgb),.3); padding: 6px 14px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .btn-evaluate:disabled { opacity: .5; cursor: default; }
+  .spin { display: inline-block; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .status-summary { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; font-size: 14px; line-height: 1.6; color: var(--text); }
+
+  .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 900px) { .status-grid { grid-template-columns: 1fr; } }
+  .status-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 15px; }
+  .status-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .status-section-title .icon { font-size: 13px; }
+  .status-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .status-list li { font-size: 13px; display: flex; align-items: flex-start; gap: 8px; line-height: 1.45; }
+  .status-list li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .s-todo    li::before { background: var(--yellow); }
+  .s-case    li::before { background: var(--cat-case); }
+  .s-feat    li::before { background: #34d399; }
+  .s-risk    li::before { background: var(--red); }
+  .s-rec     li::before { background: var(--cx-color); }
+  .status-empty-msg { font-size: 12px; color: var(--muted); font-style: italic; }
+
+  .status-no-data { text-align: center; padding: 44px 16px; color: var(--muted); }
+  .status-no-data strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 6px; }
+  .status-no-data p { font-size: 12px; max-width: 340px; margin: 0 auto; line-height: 1.5; }
+
+  /* API key setup */
+  .apikey-bar { background: rgba(79,107,255,.06); border: 1px solid rgba(79,107,255,.2); border-radius: var(--radius); padding: 11px 14px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .apikey-bar label { font-size: 12px; color: var(--muted); margin: 0; white-space: nowrap; flex-shrink: 0; }
+  .apikey-bar input { flex: 1; min-width: 200px; font-family: monospace; font-size: 12px; }
+  .apikey-bar .btn-ghost { flex-shrink: 0; padding: 5px 11px; font-size: 12px; }
+
   /* ── Toast ── */
   #toast { position: fixed; bottom: 18px; right: 18px; background: #1e293b; border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 13px; font-size: 13px; opacity: 0; transition: opacity .22s; pointer-events: none; z-index: 9999; max-width: 300px; }
   #toast.show { opacity: 1; }
@@ -293,6 +333,7 @@
       <div class="tab" onclick="switchTab('log')">Time Log</div>
       <div class="tab" onclick="switchTab('by-week')">By Week</div>
       <div class="tab" onclick="switchTab('profile')">Profile</div>
+      <div class="tab" onclick="switchTab('status')">Status</div>
     </div>
 
     <div class="tab-pane active" id="tab-overview">
@@ -329,6 +370,10 @@
     <div class="tab-pane" id="tab-profile">
       <div id="profile-file-bar"></div>
       <div id="profile-feed"></div>
+    </div>
+
+    <div class="tab-pane" id="tab-status">
+      <div id="status-page"></div>
     </div>
   </div>
 </div>
@@ -844,15 +889,175 @@ function dl(name, type, content) {
   a.download = name; a.click();
 }
 
+// ── Status page ───────────────────────────────────────────────────────────────
+const SKEY   = 'dse_status_v1';
+const AKEY   = 'dse_apikey_v1';
+const loadStatuses  = () => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch { return {}; } };
+const saveStatuses  = d => localStorage.setItem(SKEY, JSON.stringify(d));
+const loadApiKey    = () => localStorage.getItem(AKEY) || '';
+const saveApiKey    = k => localStorage.setItem(AKEY, k);
+
+function buildProfileText(cx) {
+  const updates = loadUpdates().filter(u => u.customer === cx).sort((a,b) => a.date.localeCompare(b.date));
+  if (!updates.length) return null;
+  return updates.map(u => `## ${u.date}\n${(u.notes || u.raw || '').trim()}`).join('\n\n---\n\n');
+}
+
+async function evaluateStatus() {
+  const apiKey = loadApiKey().trim();
+  if (!apiKey) { toast('Enter your Anthropic API key first.'); return; }
+
+  const profileText = buildProfileText(CX);
+  if (!profileText) { toast('No profile updates to analyze. Add some DSE updates first.'); return; }
+
+  const cust = (loadCustomers()||[]).find(c => c.id === CX);
+  const custName = cust ? cust.name : CX;
+
+  const btn = document.getElementById('btn-evaluate');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin">↻</span> Analyzing…'; }
+
+  const prompt = `You are analyzing a DSE (Dedicated Support Engineer) customer profile log for "${custName}".
+
+Below are the chronological DSE update notes. Extract structured information and return ONLY valid JSON — no prose, no markdown fences.
+
+Profile:
+${profileText}
+
+Return this exact JSON shape:
+{
+  "health": "green" | "yellow" | "red",
+  "health_reason": "one short sentence explaining the health status",
+  "summary": "2-3 sentence executive summary of where this customer stands",
+  "todos": ["action item 1", "action item 2"],
+  "open_cases": ["case description 1", "case description 2"],
+  "feature_requests": ["feature request 1"],
+  "risks": ["risk or concern 1"],
+  "recommendations": ["recommendation 1", "recommendation 2"]
+}
+
+Rules:
+- health green = customer is stable, no urgent issues
+- health yellow = some concerns or open blockers that need attention
+- health red = critical issues, escalation risk, or customer is frustrated
+- Keep each list item to one concise sentence
+- If a category has nothing, return an empty array
+- Return ONLY the raw JSON object`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    const raw  = data.content?.[0]?.text || '';
+    const analysis = JSON.parse(raw);
+
+    const statuses = loadStatuses();
+    statuses[CX] = { ...analysis, evaluated_at: new Date().toISOString() };
+    saveStatuses(statuses);
+    renderStatus();
+    toast('Status updated');
+  } catch (e) {
+    toast('Analysis failed: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '↻ Re-evaluate'; }
+  }
+}
+
+function renderStatus() {
+  const el = document.getElementById('status-page');
+  if (!el) return;
+
+  const apiKey    = loadApiKey();
+  const statuses  = loadStatuses();
+  const status    = statuses[CX];
+  const updates   = updates4();
+  const cust      = (loadCustomers()||[]).find(c => c.id === CX);
+  const custName  = cust ? cust.name : CX;
+
+  // API key bar (always shown)
+  const keyBar = `<div class="apikey-bar">
+    <label>Anthropic API key</label>
+    <input type="password" id="apikey-input" value="${escAttr(apiKey)}" placeholder="sk-ant-…"
+      onchange="saveApiKey(this.value)" oninput="saveApiKey(this.value)">
+    <a href="https://console.anthropic.com/settings/keys" target="_blank" class="btn-ghost" style="text-decoration:none;font-size:12px;padding:5px 11px">Get key ↗</a>
+  </div>`;
+
+  if (!updates.length) {
+    el.innerHTML = keyBar + `<div class="status-no-data">
+      <strong>No profile updates yet</strong>
+      <p>Add DSE updates in the Profile tab, then click Re-evaluate to generate the status dashboard.</p>
+    </div>`;
+    return;
+  }
+
+  const healthClass = { green:'health-green', yellow:'health-yellow', red:'health-red' }[status?.health] || 'health-yellow';
+  const healthLabel = { green:'Healthy', yellow:'Needs Attention', red:'At Risk' }[status?.health] || 'Not Evaluated';
+  const evalTime    = status?.evaluated_at
+    ? `Last evaluated ${new Date(status.evaluated_at).toLocaleString()}`
+    : `${updates.length} update${updates.length===1?'':'s'} — not yet evaluated`;
+
+  const topbar = `<div class="status-topbar">
+    ${status ? `<div class="health-badge ${healthClass}"><span class="health-dot"></span>${healthLabel}</div>` : ''}
+    ${status ? `<span style="font-size:13px;color:var(--muted)">${esc(status.health_reason||'')}</span>` : ''}
+    <span class="status-evaluated">${evalTime}</span>
+    <button class="btn-evaluate" id="btn-evaluate" onclick="evaluateStatus()">↻ Re-evaluate</button>
+  </div>`;
+
+  if (!status) {
+    el.innerHTML = keyBar + topbar + `<div class="status-no-data">
+      <strong>Ready to analyze</strong>
+      <p>Click Re-evaluate to have Claude analyze the ${updates.length} profile update${updates.length===1?'':'s'} for ${custName} and build the status dashboard.</p>
+    </div>`;
+    return;
+  }
+
+  const section = (title, icon, items, cls, emptyMsg) => `
+    <div class="status-section">
+      <div class="status-section-title"><span class="icon">${icon}</span>${title}</div>
+      ${!items?.length
+        ? `<p class="status-empty-msg">${emptyMsg}</p>`
+        : `<ul class="status-list ${cls}">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`}
+    </div>`;
+
+  el.innerHTML = keyBar + topbar +
+    `<div class="status-summary">${esc(status.summary||'')}</div>
+    <div class="status-grid">
+      ${section('Open To-Dos',          '✅', status.todos,            's-todo', 'No open to-dos')}
+      ${section('Open Cases',           '🎫', status.open_cases,       's-case', 'No open cases identified')}
+      ${section('Feature Requests',     '💡', status.feature_requests, 's-feat', 'No feature requests noted')}
+      ${section('Risks & Concerns',     '⚠️',  status.risks,           's-risk', 'No risks identified')}
+    </div>
+    <div class="status-grid">
+      ${section('Recommendations',      '→',  status.recommendations,  's-rec',  'No recommendations at this time')}
+    </div>`;
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const ns = ['overview','log','by-week','profile'];
+  const ns = ['overview','log','by-week','profile','status'];
   document.querySelectorAll('.tab').forEach((t,i)  => t.classList.toggle('active', ns[i]===name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id==='tab-'+name));
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
-function render() { renderOverview(); renderLog(); renderByWeek(); renderProfile(); }
+function render() { renderOverview(); renderLog(); renderByWeek(); renderProfile(); renderStatus(); }
 
 function renderOverview() {
   const all = entries4(), now = new Date();
