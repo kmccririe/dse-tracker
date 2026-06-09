@@ -2,7 +2,7 @@
 
 A zero-install, single-file time tracker for Dedicated Support Engineers (or anyone who tracks time across multiple customers).
 
-**[Open the app →](https://your-username.github.io/dse-tracker)**
+**[Open the app →](https://kmccririe.github.io/dse-tracker)**
 
 ---
 
@@ -53,6 +53,12 @@ Or just double-click `index.html`. Works in any modern browser. Chrome/Edge requ
 All data is stored in your browser's `localStorage` — it never leaves your machine. There is no backend, no account, and no tracking.
 
 To back up your data: open DevTools → Application → Local Storage → copy the `dse_entries_v2` and `dse_updates_v2` values.
+
+---
+
+## Example profile
+
+See [`example-profile.md`](example-profile.md) for what a linked customer profile document looks like after a week of updates.
 
 ---
 
