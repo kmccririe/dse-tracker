@@ -890,12 +890,18 @@ function dl(name, type, content) {
 }
 
 // ── Status page ───────────────────────────────────────────────────────────────
-const SKEY   = 'dse_status_v1';
-const AKEY   = 'dse_apikey_v1';
-const loadStatuses  = () => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch { return {}; } };
-const saveStatuses  = d => localStorage.setItem(SKEY, JSON.stringify(d));
-const loadApiKey    = () => localStorage.getItem(AKEY) || '';
-const saveApiKey    = k => localStorage.setItem(AKEY, k);
+const SKEY  = 'dse_status_v1';
+const AKEY  = 'dse_apikey_v1';
+const loadStatuses = () => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch { return {}; } };
+const saveStatuses = d => localStorage.setItem(SKEY, JSON.stringify(d));
+const loadApiKey   = () => localStorage.getItem(AKEY) || '';
+const saveApiKey   = k => localStorage.setItem(AKEY, k);
+
+// Aperture = local Bedrock proxy at http://ai/bedrock, no auth needed.
+// Available when running from file:// or localhost.
+const APERTURE_URL  = 'http://ai/bedrock/model/us.anthropic.claude-opus-4-6-v1:0/invoke';
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const isLocal       = () => ['localhost','127.0.0.1',''].includes(location.hostname) || location.protocol === 'file:';
 
 function buildProfileText(cx) {
   const updates = loadUpdates().filter(u => u.customer === cx).sort((a,b) => a.date.localeCompare(b.date));
@@ -903,17 +909,58 @@ function buildProfileText(cx) {
   return updates.map(u => `## ${u.date}\n${(u.notes || u.raw || '').trim()}`).join('\n\n---\n\n');
 }
 
-async function evaluateStatus() {
-  const apiKey = loadApiKey().trim();
-  if (!apiKey) { toast('Enter your Anthropic API key first.'); return; }
+async function callClaude(prompt) {
+  if (isLocal()) {
+    // Aperture / Bedrock path — no API key, Bedrock request format
+    const resp = await fetch(APERTURE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.message || `Aperture HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    return data.content?.[0]?.text || '';
+  } else {
+    // Direct Anthropic API path — requires API key
+    const apiKey = loadApiKey().trim();
+    if (!apiKey) throw new Error('Enter your Anthropic API key below.');
+    const resp = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    return data.content?.[0]?.text || '';
+  }
+}
 
+async function evaluateStatus() {
   const profileText = buildProfileText(CX);
   if (!profileText) { toast('No profile updates to analyze. Add some DSE updates first.'); return; }
 
-  const cust = (loadCustomers()||[]).find(c => c.id === CX);
+  const cust     = (loadCustomers()||[]).find(c => c.id === CX);
   const custName = cust ? cust.name : CX;
-
-  const btn = document.getElementById('btn-evaluate');
+  const btn      = document.getElementById('btn-evaluate');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin">↻</span> Analyzing…'; }
 
   const prompt = `You are analyzing a DSE (Dedicated Support Engineer) customer profile log for "${custName}".
@@ -944,32 +991,10 @@ Rules:
 - Return ONLY the raw JSON object`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error?.message || `HTTP ${resp.status}`);
-    }
-
-    const data = await resp.json();
-    const raw  = data.content?.[0]?.text || '';
+    const raw      = await callClaude(prompt);
     const analysis = JSON.parse(raw);
-
     const statuses = loadStatuses();
-    statuses[CX] = { ...analysis, evaluated_at: new Date().toISOString() };
+    statuses[CX]   = { ...analysis, evaluated_at: new Date().toISOString() };
     saveStatuses(statuses);
     renderStatus();
     toast('Status updated');
@@ -984,20 +1009,26 @@ function renderStatus() {
   const el = document.getElementById('status-page');
   if (!el) return;
 
-  const apiKey    = loadApiKey();
-  const statuses  = loadStatuses();
-  const status    = statuses[CX];
-  const updates   = updates4();
-  const cust      = (loadCustomers()||[]).find(c => c.id === CX);
-  const custName  = cust ? cust.name : CX;
+  const statuses = loadStatuses();
+  const status   = statuses[CX];
+  const updates  = updates4();
+  const cust     = (loadCustomers()||[]).find(c => c.id === CX);
+  const custName = cust ? cust.name : CX;
+  const local    = isLocal();
 
-  // API key bar (always shown)
-  const keyBar = `<div class="apikey-bar">
-    <label>Anthropic API key</label>
-    <input type="password" id="apikey-input" value="${escAttr(apiKey)}" placeholder="sk-ant-…"
-      onchange="saveApiKey(this.value)" oninput="saveApiKey(this.value)">
-    <a href="https://console.anthropic.com/settings/keys" target="_blank" class="btn-ghost" style="text-decoration:none;font-size:12px;padding:5px 11px">Get key ↗</a>
-  </div>`;
+  // Show API key bar only when NOT on Aperture
+  const apiKey = loadApiKey();
+  const keyBar = local
+    ? `<div class="apikey-bar" style="background:rgba(34,197,94,.06);border-color:rgba(34,197,94,.2)">
+        <span style="font-size:12px;color:var(--green)">● Connected via Aperture</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:4px">— no API key needed</span>
+      </div>`
+    : `<div class="apikey-bar">
+        <label>Anthropic API key</label>
+        <input type="password" id="apikey-input" value="${escAttr(apiKey)}" placeholder="sk-ant-…"
+          onchange="saveApiKey(this.value)" oninput="saveApiKey(this.value)">
+        <a href="https://console.anthropic.com/settings/keys" target="_blank" class="btn-ghost" style="text-decoration:none;font-size:12px;padding:5px 11px">Get key ↗</a>
+      </div>`;
 
   if (!updates.length) {
     el.innerHTML = keyBar + `<div class="status-no-data">
