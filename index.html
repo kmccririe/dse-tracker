@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DSE Tracker</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+    --text: #e2e4ec; --muted: #6b7280; --radius: 8px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --cat-case: #a78bfa; --cat-upgrade: #fb923c; --cat-meeting: #34d399;
+    --green: #22c55e; --red: #ef4444; --yellow: #f59e0b;
+    /* active customer — set dynamically by JS */
+    --cx-color: #00a8e0;
+    --cx-rgb: 0, 168, 224;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; height: 100vh; display: flex; flex-direction: column; }
+
+  /* ── Header ── */
+  header { padding: 0 20px; border-bottom: 3px solid rgba(var(--cx-rgb),.6); background: rgba(var(--cx-rgb),.05); display: flex; align-items: center; height: 52px; flex-shrink: 0; gap: 0; transition: border-color .25s, background .25s; }
+  .logo { font-size: 15px; font-weight: 700; margin-right: 16px; white-space: nowrap; }
+
+  /* segmented pill switcher */
+  .cust-switcher { display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; padding: 3px; gap: 2px; max-width: 480px; overflow-x: auto; }
+  .cust-btn { height: 28px; padding: 0 14px; background: transparent; border: none; border-radius: 99px; font-family: var(--font); font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); transition: all .18s; white-space: nowrap; flex-shrink: 0; }
+  .cust-btn:hover { color: var(--text); }
+  .cust-btn.active { color: #000 !important; }
+
+  /* "Viewing" chip */
+  .viewing-chip { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 99px; border: 1.5px solid rgba(var(--cx-rgb),.4); background: rgba(var(--cx-rgb),.1); color: var(--cx-color); transition: all .25s; white-space: nowrap; }
+  .vc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cx-color); flex-shrink: 0; transition: background .25s; }
+  .hdr-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  /* header icon buttons */
+  .hdr-icon-btn { background: rgba(255,255,255,.06); border: 1px solid var(--border); color: var(--muted); padding: 5px 10px; font-size: 13px; font-family: var(--font); border-radius: var(--radius); cursor: pointer; transition: all .15s; display: flex; align-items: center; gap: 5px; }
+  .hdr-icon-btn:hover { color: var(--text); background: rgba(255,255,255,.1); }
+  .hdr-icon-btn:disabled { opacity: .3; cursor: default; }
+  .undo-count { background: rgba(255,255,255,.1); border-radius: 99px; padding: 1px 6px; font-size: 10px; }
+
+  /* ── Layout ── */
+  .layout { display: grid; grid-template-columns: 330px 1fr; flex: 1; min-height: 0; }
+  .left  { border-right: 1px solid rgba(var(--cx-rgb),.2); overflow-y: auto; transition: border-color .25s; }
+  .right { overflow-y: auto; padding: 18px 22px; }
+
+  /* ── Active tab ── */
+  .tabs { display: flex; gap: 3px; margin-bottom: 16px; }
+  .tab { padding: 6px 13px; border-radius: var(--radius); cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; transition: all .15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { background: rgba(var(--cx-rgb),.12); color: var(--cx-color); }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* ── Panels ── */
+  .panel { padding: 13px 15px; border-bottom: 1px solid var(--border); }
+  .ptitle { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 9px; }
+  .hint { font-size: 11px; color: var(--muted); line-height: 1.4; margin-bottom: 8px; }
+
+  /* ── Forms ── */
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; margin-top: 8px; }
+  label:first-of-type { margin-top: 0; }
+  input, select, textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 6px 9px; font-family: var(--font); font-size: 13px; outline: none; transition: border-color .15s; }
+  input:focus, select:focus, textarea:focus { border-color: #4f6bff; }
+  textarea { resize: vertical; }
+  select option { background: #1a1d27; }
+  .time-row { display: flex; gap: 6px; }
+  .time-row input  { flex: 1; }
+  .time-row select { flex: 0 0 68px; }
+
+  /* ── Buttons ── */
+  button { cursor: pointer; border: none; border-radius: var(--radius); font-family: var(--font); font-size: 13px; font-weight: 500; padding: 8px 14px; transition: opacity .15s; }
+  button:hover { opacity: .82; }
+  .btn-primary { background: #4f6bff; color: #fff; width: 100%; margin-top: 9px; }
+  .btn-green   { background: rgba(34,197,94,.12); color: var(--green); border: 1px solid rgba(34,197,94,.25); width: 100%; margin-top: 7px; }
+  .btn-ghost   { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-danger  { background: rgba(239,68,68,.12); color: var(--red); padding: 3px 8px; font-size: 12px; }
+  .btn-addtime { background: rgba(245,158,11,.12); color: var(--yellow); border: 1px solid rgba(245,158,11,.25); padding: 3px 8px; font-size: 12px; }
+  .btn-sm      { padding: 5px 11px; font-size: 12px; }
+  .btn-conf    { background: rgba(245,158,11,.18); color: var(--yellow); border: 1px solid rgba(245,158,11,.3); padding: 5px 11px; font-size: 12px; }
+  .btn-canc    { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 5px 9px; font-size: 12px; }
+  .btn-edit    { background: rgba(79,107,255,.12); color: #818cf8; border: 1px solid rgba(79,107,255,.25); padding: 3px 8px; font-size: 12px; }
+  .btn-save-edit { background: rgba(79,107,255,.2); color: #818cf8; border: 1px solid rgba(79,107,255,.35); padding: 5px 11px; font-size: 12px; }
+
+  /* ── Category pills ── */
+  .cat { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+  .cat-case    { background: rgba(167,139,250,.15); color: var(--cat-case); }
+  .cat-upgrade { background: rgba(251,146,60,.15);  color: var(--cat-upgrade); }
+  .cat-meeting { background: rgba(52,211,153,.15);  color: var(--cat-meeting); }
+
+  /* ── Stat cards ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap: 9px; margin-bottom: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px; }
+  .card .cl { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .card .cv { font-size: 24px; font-weight: 700; margin-top: 2px; }
+  .card .cs { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  /* ── Charts ── */
+  .chart-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 15px; margin-bottom: 16px; }
+  .chart-title { font-size: 12px; color: var(--muted); margin-bottom: 9px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 5px; }
+  .legend { display: flex; gap: 10px; }
+  .leg { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+  .leg span { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+  .bar-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .bar-label-wide { width: 128px; color: var(--muted); text-align: right; flex-shrink: 0; font-size: 12px; }
+  .bar-track-h { flex: 1; height: 13px; background: var(--bg); border-radius: 3px; overflow: hidden; display: flex; }
+  .bar-seg { height: 100%; }
+  .bar-val { width: 44px; flex-shrink: 0; text-align: right; font-weight: 600; font-size: 11px; }
+
+  /* ── Vertical timeline chart ── */
+  .timeline-chart { width: 100%; overflow-x: auto; }
+  .timeline-inner { display: flex; align-items: flex-end; gap: 3px; min-width: max-content; }
+  .tc-col { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: default; position: relative; }
+  .tc-col:hover .tc-bar-wrap { opacity: .85; }
+  .tc-bar-wrap { display: flex; flex-direction: column-reverse; width: 18px; gap: 1px; }
+  .tc-seg { width: 100%; }
+  .tc-seg:last-child { border-radius: 2px 2px 0 0; }
+  .tc-axis-line { width: 100%; height: 1px; background: var(--border); margin-top: 4px; }
+  .tc-label { font-size: 10px; color: var(--muted); text-align: center; white-space: nowrap; transform: rotate(-45deg); transform-origin: top center; margin-top: 6px; width: 32px; }
+  .tc-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1e293b; border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 12px; line-height: 1.6; pointer-events: none; z-index: 100; white-space: nowrap; }
+  .tc-col:hover .tc-tooltip { display: block; }
+  .tc-zero .tc-bar-wrap { opacity: .25; }
+  .tc-yaxis { display: flex; flex-direction: column; justify-content: space-between; padding-bottom: 32px; margin-right: 4px; flex-shrink: 0; }
+  .tc-ylabel { font-size: 10px; color: var(--muted); text-align: right; line-height: 1; }
+
+  /* ── Profile feed ── */
+  .feed { display: flex; flex-direction: column; gap: 9px; }
+  .feed-item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 13px; }
+  .feed-header { font-size: 11px; color: var(--muted); margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .feed-date-label { font-weight: 600; }
+  .feed-del { background: transparent; border: none; color: var(--border); font-size: 13px; cursor: pointer; padding: 0; line-height: 1; flex-shrink: 0; }
+  .feed-del:hover { color: var(--red); opacity: 1; }
+  .feed-body { font-size: 13px; white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 6px 9px; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 9px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.015); }
+  .ntd { max-width: 270px; color: var(--muted); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  .hbadge { display: inline-block; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .acts { display: flex; gap: 4px; }
+
+  /* ── Inline +time ── */
+  .at-tr td { background: rgba(245,158,11,.03) !important; border-bottom: 1px solid rgba(245,158,11,.15) !important; }
+  .at-form { display: flex; gap: 7px; flex-wrap: wrap; align-items: flex-end; }
+  .at-form > div { display: flex; flex-direction: column; gap: 3px; }
+  .at-form label { font-size: 11px; margin-top: 0; color: var(--muted); }
+  .at-time-row { display: flex; gap: 5px; }
+  .at-time-row input  { width: 58px; font-size: 12px; padding: 4px 7px; }
+  .at-time-row select { width: 58px; font-size: 12px; padding: 4px 5px; }
+  .at-form textarea { width: 180px; min-height: 38px; font-size: 12px; padding: 4px 7px; }
+
+  /* ── Inline edit ── */
+  .edit-tr td { background: rgba(79,107,255,.04) !important; border-bottom: 1px solid rgba(79,107,255,.18) !important; }
+  .edit-form { display: flex; gap: 7px; flex-wrap: wrap; align-items: flex-end; }
+  .edit-form > div { display: flex; flex-direction: column; gap: 3px; }
+  .edit-form label { font-size: 11px; margin-top: 0; color: var(--muted); }
+  .edit-form input[type=date] { width: 130px; font-size: 12px; padding: 4px 7px; }
+  .edit-form select.edit-cat  { width: 140px; font-size: 12px; padding: 4px 7px; }
+  .edit-form .edit-time-row { display: flex; gap: 5px; }
+  .edit-form .edit-time-row input  { width: 58px; font-size: 12px; padding: 4px 7px; }
+  .edit-form .edit-time-row select { width: 58px; font-size: 12px; padding: 4px 5px; }
+  .edit-form textarea { width: 200px; min-height: 38px; font-size: 12px; padding: 4px 7px; }
+
+  /* ── Week header rows ── */
+  .wk-hdr td { background: rgba(255,255,255,.025) !important; font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--border) !important; }
+
+  /* ── Update parse preview ── */
+  .pp-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px; margin-top: 7px; }
+  .pp-meta { font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 8px; align-items: center; }
+  .pp-meta input[type=date] { flex: 1; font-size: 12px; padding: 3px 6px; }
+  .pp-notes-pre { font-size: 12px; white-space: pre-wrap; max-height: 90px; overflow-y: auto; color: var(--text); line-height: 1.5; }
+  .pp-btns { display: flex; gap: 6px; margin-top: 8px; }
+  .pp-btns button { flex: 1; margin-top: 0; }
+
+  /* ── File link banner ── */
+  .file-link-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(34,197,94,.07); border: 1px solid rgba(34,197,94,.2); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 14px; font-size: 12px; }
+  .file-link-bar.linked { background: rgba(34,197,94,.05); border-color: rgba(34,197,94,.15); }
+  .file-link-status { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .file-link-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
+  .file-link-status.linked .dot { background: var(--green); }
+  .file-link-status.linked { color: var(--green); }
+  .btn-link-file { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+
+  /* ── Settings modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; width: 400px; max-width: 92vw; max-height: 90vh; overflow-y: auto; }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .modal-header h3 { font-size: 15px; font-weight: 700; }
+  .modal-close { background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 0; line-height: 1; }
+  .modal-close:hover { color: var(--text); opacity: 1; }
+  .cx-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 18px; }
+  .cx-list-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--border); }
+  .cx-swatch { width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; border: 1px solid rgba(255,255,255,.1); }
+  .cx-list-name { flex: 1; font-size: 13px; font-weight: 500; }
+  .cx-list-count { font-size: 11px; color: var(--muted); }
+  .modal-divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .modal-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+  .add-cx-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+  .add-cx-form > div { display: flex; flex-direction: column; gap: 4px; }
+  .add-cx-form label { font-size: 11px; margin-top: 0; }
+  .add-cx-form input[type=text]  { width: 180px; }
+  .add-cx-form input[type=color] { width: 44px; height: 34px; padding: 2px 3px; cursor: pointer; border-radius: var(--radius); }
+  .add-cx-form .btn-primary { width: auto; margin-top: 0; padding: 6px 14px; align-self: flex-end; }
+
+  /* ── Export row ── */
+  .export-row { display: flex; gap: 7px; margin-bottom: 13px; flex-wrap: wrap; }
+
+  /* ── Empty state ── */
+  .empty { text-align: center; padding: 44px 16px; color: var(--muted); }
+  .empty strong { display: block; margin-bottom: 4px; font-size: 14px; color: var(--text); }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 18px; right: 18px; background: #1e293b; border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 13px; font-size: 13px; opacity: 0; transition: opacity .22s; pointer-events: none; z-index: 9999; max-width: 300px; }
+  #toast.show { opacity: 1; }
+
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">DSE Tracker</span>
+  <div class="cust-switcher" id="cust-switcher"></div>
+  <div class="hdr-right">
+    <div class="viewing-chip">
+      <span class="vc-dot"></span>
+      <span id="cx-label"></span>
+    </div>
+    <button class="hdr-icon-btn" onclick="openSettings()" title="Manage customers">⚙ Customers</button>
+    <button class="hdr-icon-btn" id="btn-undo" disabled onclick="undo()" title="Undo (⌘Z)">
+      ↩ Undo <span class="undo-count" id="undo-count" style="display:none"></span>
+    </button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="left">
+
+    <div class="panel">
+      <div class="ptitle">DSE Update</div>
+      <p class="hint">Paste your daily Slack update to save it to the profile feed.</p>
+      <div id="upd-input-area">
+        <textarea id="update-ta" style="min-height:95px" placeholder="DSE Update 6/9/2026&#10;...your update text..."></textarea>
+        <button class="btn-green" onclick="parseUpdate()">Parse Update</button>
+      </div>
+      <div id="upd-preview" style="display:none">
+        <div class="pp-box">
+          <div class="pp-meta">
+            <span>Date:</span>
+            <input type="date" id="pp-date-in">
+          </div>
+          <div class="pp-notes-pre" id="pp-notes-pre"></div>
+        </div>
+        <div class="pp-btns">
+          <button class="btn-primary" style="background:#22863a" onclick="saveUpdate()">Save to Profile</button>
+          <button class="btn-ghost btn-sm" onclick="cancelUpdate()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="ptitle">Log Time</div>
+      <label>Date</label>
+      <input type="date" id="in-date">
+      <label>Category</label>
+      <select id="in-cat">
+        <option value="case">Case Work</option>
+        <option value="upgrade">Upgrade / Planning</option>
+        <option value="meeting">Customer Meeting</option>
+      </select>
+      <label>Time</label>
+      <div class="time-row">
+        <input type="number" id="in-amount" min="1" step="1" placeholder="e.g. 90">
+        <select id="in-unit">
+          <option value="h">hrs</option>
+          <option value="m">min</option>
+        </select>
+      </div>
+      <label>Notes <span style="font-size:11px;font-weight:400">(optional)</span></label>
+      <textarea id="in-notes" style="min-height:50px" placeholder="Case #, topic, etc."></textarea>
+      <button class="btn-primary" onclick="addEntry()">Add Entry</button>
+    </div>
+
+  </div>
+
+  <div class="right">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('overview')">Overview</div>
+      <div class="tab" onclick="switchTab('log')">Time Log</div>
+      <div class="tab" onclick="switchTab('by-week')">By Week</div>
+      <div class="tab" onclick="switchTab('profile')">Profile</div>
+    </div>
+
+    <div class="tab-pane active" id="tab-overview">
+      <div id="stat-cards" class="cards"></div>
+      <div class="chart-wrap">
+        <div class="chart-title">
+          <span>Hours by day — last 30 days</span>
+          <div class="legend">
+            <div class="leg"><span style="background:var(--cat-case)"></span>Case</div>
+            <div class="leg"><span style="background:var(--cat-upgrade)"></span>Upgrade</div>
+            <div class="leg"><span style="background:var(--cat-meeting)"></span>Meeting</div>
+          </div>
+        </div>
+        <div id="chart-daily"></div>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-title">Category breakdown — all time</div>
+        <div id="chart-cats"></div>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tab-log">
+      <div class="export-row">
+        <button class="btn-ghost btn-sm" onclick="exportCSV()">Export CSV</button>
+        <button class="btn-ghost btn-sm" onclick="clearCustomer()" style="color:var(--red)">Clear All</button>
+      </div>
+      <div id="log-table"></div>
+    </div>
+
+    <div class="tab-pane" id="tab-by-week">
+      <div id="week-table"></div>
+    </div>
+
+    <div class="tab-pane" id="tab-profile">
+      <div id="profile-file-bar"></div>
+      <div id="profile-feed"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings modal (injected by JS) -->
+<div id="modal-root"></div>
+<div id="toast"></div>
+
+<script>
+// ── Customer storage ───────────────────────────────────────────────────────────
+const CKEY = 'dse_customers_v1';
+const EKEY = 'dse_entries_v2';
+const UKEY = 'dse_updates_v2';
+
+const loadCustomers = () => { try { return JSON.parse(localStorage.getItem(CKEY)) || null; } catch { return null; } };
+const saveCustomers = d => localStorage.setItem(CKEY, JSON.stringify(d));
+const loadEntries   = () => { try { return JSON.parse(localStorage.getItem(EKEY)) || []; } catch { return []; } };
+const saveEntries   = d => localStorage.setItem(EKEY, JSON.stringify(d));
+const loadUpdates   = () => { try { return JSON.parse(localStorage.getItem(UKEY)) || []; } catch { return []; } };
+const saveUpdates   = d => localStorage.setItem(UKEY, JSON.stringify(d));
+
+const DEFAULT_CUSTOMERS = [
+  { id: 'cust_a', name: 'Customer A', color: '#00a8e0' },
+  { id: 'cust_b', name: 'Customer B', color: '#a78bfa' },
+];
+
+function initCustomers() {
+  if (loadCustomers()) return;
+  // Detect existing ATT/JPMC data and preserve it
+  const entries = loadEntries();
+  const hasAtt  = entries.some(e => e.customer === 'ATT');
+  const hasJpmc = entries.some(e => e.customer === 'JPMC');
+  if (hasAtt || hasJpmc) {
+    const cx = [];
+    if (hasAtt)  cx.push({ id: 'ATT',  name: 'AT&T', color: '#00a8e0' });
+    if (hasJpmc) cx.push({ id: 'JPMC', name: 'JPMC', color: '#60a5fa' });
+    saveCustomers(cx);
+  } else {
+    saveCustomers([...DEFAULT_CUSTOMERS]);
+  }
+}
+
+function hexToRgb(hex) {
+  const h = hex.replace('#','');
+  const r = parseInt(h.slice(0,2),16);
+  const g = parseInt(h.slice(2,4),16);
+  const b = parseInt(h.slice(4,6),16);
+  return [r, g, b];
+}
+
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'customer';
+}
+
+// ── File System Access ────────────────────────────────────────────────────────
+const fileHandles  = {};
+const FS_SUPPORTED = ('showOpenFilePicker' in window);
+
+async function linkProfileFile(cx) {
+  if (!FS_SUPPORTED) { toast('File System Access not supported — use Chrome or Edge.'); return; }
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      id: 'dse-profile',
+      startIn: 'documents',
+      types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }],
+    });
+    fileHandles[cx] = handle;
+    renderProfileFilebar();
+    await writeProfileFile(cx);
+    toast(`Linked ${handle.name} — auto-syncing`);
+  } catch (e) {
+    if (e.name !== 'AbortError') toast('Could not link file: ' + e.message);
+  }
+}
+
+function buildProfileMarkdown(cx) {
+  const cust    = (loadCustomers() || []).find(c => c.id === cx);
+  const cname   = cust ? cust.name : cx;
+  const updates = loadUpdates().filter(u => u.customer === cx).sort((a,b) => b.date.localeCompare(a.date));
+  const lines   = [`# ${cname} — DSE Profile`, ``, `*Last updated: ${new Date().toLocaleString()}*`, ``, `---`, ``];
+  if (!updates.length) {
+    lines.push('*No updates yet.*');
+  } else {
+    updates.forEach(u => {
+      lines.push(`## ${u.date}`, ``);
+      lines.push((u.notes || u.raw || '').trim(), ``, `---`, ``);
+    });
+  }
+  return lines.join('\n');
+}
+
+async function writeProfileFile(cx) {
+  const handle = fileHandles[cx];
+  if (!handle) return;
+  try {
+    const w = await handle.createWritable();
+    await w.write(buildProfileMarkdown(cx));
+    await w.close();
+  } catch (e) {
+    if (e.name === 'NotAllowedError') { fileHandles[cx] = null; renderProfileFilebar(); }
+    toast('File write failed: ' + e.message);
+  }
+}
+
+function renderProfileFilebar() {
+  const el = document.getElementById('profile-file-bar');
+  if (!el) return;
+  const handle  = fileHandles[CX];
+  const linked  = !!handle;
+  const cust    = (loadCustomers() || []).find(c => c.id === CX);
+  const fname   = linked ? handle.name : (slugify(cust ? cust.name : CX) + '-profile.md');
+  el.innerHTML  = `<div class="file-link-bar${linked ? ' linked' : ''}">
+    <div class="file-link-status${linked ? ' linked' : ''}">
+      <span class="dot"></span>
+      ${linked ? `Auto-syncing to <strong style="margin-left:3px">${fname}</strong>` : `Link <strong style="margin:0 3px">${fname}</strong> to enable auto-sync`}
+    </div>
+    <button class="btn-link-file" onclick="linkProfileFile('${CX}')">${linked ? 'Re-link' : 'Link File'}</button>
+  </div>`;
+}
+
+// ── Undo stack ────────────────────────────────────────────────────────────────
+const UNDO_MAX = 20;
+let undoStack  = [];
+
+function pushUndo() {
+  undoStack.push({ entries: loadEntries(), updates: loadUpdates(), customers: loadCustomers() });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  syncUndoBtn();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  const snap = undoStack.pop();
+  saveEntries(snap.entries);
+  saveUpdates(snap.updates);
+  saveCustomers(snap.customers);
+  openAddId  = null;
+  openEditId = null;
+  syncUndoBtn();
+  renderSwitcher();
+  render();
+  toast('Undone');
+}
+
+function syncUndoBtn() {
+  const btn = document.getElementById('btn-undo');
+  const cnt = document.getElementById('undo-count');
+  btn.disabled = undoStack.length === 0;
+  if (undoStack.length > 1) { cnt.textContent = undoStack.length; cnt.style.display = ''; }
+  else cnt.style.display = 'none';
+}
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+  if (e.key === 'Escape') closeSettings();
+});
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let CX         = null;
+let openAddId  = null;
+let openEditId = null;
+let parsedUpd  = null;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const today    = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+const esc      = s  => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+const escAttr  = s  => (s || '').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const isoWeek  = ds => { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay() + 1); return d.toISOString().slice(0, 10); };
+const catLabel = c  => ({ case: 'Case Work', upgrade: 'Upgrade/Planning', meeting: 'Meeting' }[c] || 'Case Work');
+const catCls   = c  => 'cat cat-' + (c || 'case');
+const cxColor  = () => { const c = (loadCustomers()||[]).find(x => x.id === CX); return c ? c.color : '#888'; };
+const entries4 = () => loadEntries().filter(e => e.customer === CX);
+const updates4 = () => loadUpdates().filter(u => u.customer === CX);
+
+function fmtH(h) {
+  const totalMin = Math.round(h * 60);
+  const hrs = Math.floor(totalMin / 60), min = totalMin % 60;
+  if (hrs === 0) return `${min}m`;
+  if (min === 0) return `${hrs}h`;
+  return `${hrs}h ${min}m`;
+}
+
+function readHours(amtId, unitId) {
+  const v = parseFloat(document.getElementById(amtId).value);
+  if (isNaN(v) || v <= 0) return NaN;
+  return document.getElementById(unitId).value === 'm' ? v / 60 : v;
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ── Customer switch ───────────────────────────────────────────────────────────
+function setCustomer(id) {
+  CX = id;
+  const cust = (loadCustomers() || []).find(c => c.id === id);
+  const color = cust ? cust.color : '#888';
+  const [r, g, b] = hexToRgb(color);
+  document.body.style.setProperty('--cx-color', color);
+  document.body.style.setProperty('--cx-rgb', `${r}, ${g}, ${b}`);
+  document.getElementById('cx-label').textContent = cust ? cust.name : id;
+  renderSwitcher();
+  openAddId  = null;
+  openEditId = null;
+  cancelUpdate();
+  render();
+}
+
+function renderSwitcher() {
+  const customers = loadCustomers() || [];
+  document.getElementById('cust-switcher').innerHTML = customers.map(c => {
+    const active = c.id === CX;
+    const style  = active ? `background:${c.color};color:#000;box-shadow:0 1px 8px ${c.color}66` : '';
+    return `<button class="cust-btn${active ? ' active' : ''}" style="${style}" onclick="setCustomer('${escAttr(c.id)}')">${esc(c.name)}</button>`;
+  }).join('');
+}
+
+// ── Customer management (settings modal) ──────────────────────────────────────
+function openSettings() {
+  renderSettingsModal();
+  document.getElementById('modal-root').style.display = '';
+}
+
+function closeSettings() {
+  document.getElementById('modal-root').style.display = 'none';
+}
+
+function renderSettingsModal() {
+  const customers = loadCustomers() || [];
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeSettings()">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Manage Customers</h3>
+        <button class="modal-close" onclick="closeSettings()">✕</button>
+      </div>
+
+      <div class="modal-section-label">Current customers</div>
+      <div class="cx-list">
+        ${customers.length === 0 ? '<div style="font-size:12px;color:var(--muted);padding:8px 0">No customers yet.</div>' :
+          customers.map(c => {
+            const eCount = loadEntries().filter(e => e.customer === c.id).length;
+            const uCount = loadUpdates().filter(u => u.customer === c.id).length;
+            return `<div class="cx-list-row">
+              <span class="cx-swatch" style="background:${c.color}"></span>
+              <span class="cx-list-name">${esc(c.name)}</span>
+              <span class="cx-list-count">${eCount} entr${eCount===1?'y':'ies'}, ${uCount} update${uCount===1?'':'s'}</span>
+              ${customers.length > 1
+                ? `<button class="btn-danger" onclick="removeCustomer('${escAttr(c.id)}')" title="Remove">✕</button>`
+                : `<span style="font-size:11px;color:var(--muted)">(last)</span>`}
+            </div>`;
+          }).join('')}
+      </div>
+
+      <hr class="modal-divider">
+      <div class="modal-section-label">Add a customer</div>
+      <div class="add-cx-form">
+        <div>
+          <label>Name</label>
+          <input type="text" id="new-cx-name" placeholder="e.g. Acme Corp" maxlength="40"
+            onkeydown="if(event.key==='Enter')addCustomer()">
+        </div>
+        <div>
+          <label>Color</label>
+          <input type="color" id="new-cx-color" value="#4f6bff">
+        </div>
+        <button class="btn-primary" onclick="addCustomer()">Add</button>
+      </div>
+    </div>
+  </div>`;
+  setTimeout(() => document.getElementById('new-cx-name')?.focus(), 50);
+}
+
+function addCustomer() {
+  const name  = (document.getElementById('new-cx-name').value || '').trim();
+  const color = document.getElementById('new-cx-color').value || '#4f6bff';
+  if (!name) { toast('Enter a customer name.'); return; }
+  const customers = loadCustomers() || [];
+  const id = 'cust_' + Date.now();
+  pushUndo();
+  customers.push({ id, name, color });
+  saveCustomers(customers);
+  renderSwitcher();
+  renderSettingsModal();
+  toast(`Added "${name}"`);
+}
+
+function removeCustomer(id) {
+  const customers = loadCustomers() || [];
+  if (customers.length <= 1) { toast("Can't remove the last customer."); return; }
+  const cust = customers.find(c => c.id === id);
+  const eCount = loadEntries().filter(e => e.customer === id).length;
+  const uCount = loadUpdates().filter(u => u.customer === id).length;
+  const total  = eCount + uCount;
+  const msg = total > 0
+    ? `Remove "${cust?.name}"? This will also delete ${total} time entr${total===1?'y':'ies'} and update${total===1?'':'s'}. This can be undone.`
+    : `Remove "${cust?.name}"?`;
+  if (!confirm(msg)) return;
+  pushUndo();
+  saveCustomers(customers.filter(c => c.id !== id));
+  saveEntries(loadEntries().filter(e => e.customer !== id));
+  saveUpdates(loadUpdates().filter(u => u.customer !== id));
+  // Switch to another customer if we removed the active one
+  if (CX === id) {
+    const remaining = loadCustomers() || [];
+    if (remaining.length) setCustomer(remaining[0].id);
+  }
+  renderSwitcher();
+  renderSettingsModal();
+  toast(`Removed "${cust?.name}"`);
+}
+
+// ── Parse / Save DSE Update ───────────────────────────────────────────────────
+function parseUpdate() {
+  const raw = document.getElementById('update-ta').value.trim();
+  if (!raw) { toast('Paste an update first.'); return; }
+
+  let date = today();
+  const dm = raw.match(/DSE\s+Update\s+(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i);
+  if (dm) {
+    const rd = dm[1];
+    if (rd.includes('-')) { date = rd; }
+    else { const [m,d,y]=rd.split('/'); date=`${y.length===2?'20'+y:y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`; }
+  }
+
+  const notes = raw.split('\n').filter((l,i) => {
+    if (i === 0 && /^\s*DSE\s+Update/i.test(l)) return false;
+    if (/^\s*hours?\s*[:\s]\s*[\d.]+\s*$/i.test(l)) return false;
+    return true;
+  }).join('\n').trim();
+
+  parsedUpd = { notes, raw };
+  document.getElementById('pp-date-in').value = date;
+  document.getElementById('pp-notes-pre').textContent = notes || raw;
+  document.getElementById('upd-input-area').style.display = 'none';
+  document.getElementById('upd-preview').style.display    = '';
+}
+
+function saveUpdate() {
+  if (!parsedUpd) return;
+  const date = document.getElementById('pp-date-in').value || today();
+  pushUndo();
+  const updates = loadUpdates();
+  updates.push({ id: Date.now(), customer: CX, date, notes: parsedUpd.notes, raw: parsedUpd.raw });
+  saveUpdates(updates);
+  cancelUpdate();
+  renderProfile();
+  writeProfileFile(CX);
+  toast('Update saved to profile');
+}
+
+function cancelUpdate() {
+  parsedUpd = null;
+  document.getElementById('upd-preview').style.display    = 'none';
+  document.getElementById('upd-input-area').style.display = '';
+  document.getElementById('update-ta').value = '';
+}
+
+// ── Add time entry ────────────────────────────────────────────────────────────
+function addEntry() {
+  const date  = document.getElementById('in-date').value;
+  const cat   = document.getElementById('in-cat').value;
+  const hours = readHours('in-amount', 'in-unit');
+  const notes = document.getElementById('in-notes').value.trim();
+  if (!date)        { toast('Enter a date.'); return; }
+  if (isNaN(hours)) { toast('Enter a valid time.'); return; }
+  pushUndo();
+  loadEntries().concat([{ id: Date.now(), customer: CX, date, hours, category: cat, notes }]);
+  saveEntries([...loadEntries(), { id: Date.now(), customer: CX, date, hours, category: cat, notes }]);
+  render();
+  toast(`Logged ${fmtH(hours)} — ${catLabel(cat)}`);
+  document.getElementById('in-amount').value = '';
+  document.getElementById('in-notes').value  = '';
+  document.getElementById('in-date').value   = today();
+}
+
+// ── Inline +time ──────────────────────────────────────────────────────────────
+function openAddTime(id) {
+  openAddId = openAddId === id ? null : id;
+  renderLog(); renderByWeek();
+  if (openAddId) { const el = document.getElementById('ath-'+id); if(el) el.focus(); }
+}
+
+function confirmAddTime(id) {
+  const amt = document.getElementById('ath-'+id);
+  const unt = document.getElementById('atu-'+id);
+  if (!amt || !unt) return;
+  const v = parseFloat(amt.value);
+  if (isNaN(v) || v <= 0) { toast('Enter a time amount.'); return; }
+  const addH = unt.value === 'm' ? v/60 : v;
+  const note = (document.getElementById('atn-'+id)||{}).value || '';
+  pushUndo();
+  saveEntries(loadEntries().map(e => {
+    if (e.id !== id) return e;
+    return { ...e, hours: Math.round((e.hours+addH)*1000)/1000,
+      notes: note ? (e.notes ? e.notes+'\n— '+note : note) : e.notes };
+  }));
+  openAddId = null; render(); toast(`Added ${fmtH(addH)}`);
+}
+
+function cancelAddTime() { openAddId = null; renderLog(); renderByWeek(); }
+
+// ── Inline edit ───────────────────────────────────────────────────────────────
+function openEdit(id) {
+  if (openEditId === id) { openEditId = null; renderLog(); renderByWeek(); return; }
+  openAddId = null; openEditId = id;
+  renderLog(); renderByWeek();
+  const e = loadEntries().find(x => x.id === id);
+  if (!e) return;
+  const useMin = e.hours < 1 && e.hours > 0;
+  const amt    = useMin ? Math.round(e.hours*60) : e.hours;
+  const s = sfx => document.getElementById(sfx+id);
+  if (s('eed-amt-'))  s('eed-amt-').value  = amt;
+  if (s('eed-unit-')) s('eed-unit-').value = useMin ? 'm' : 'h';
+  if (s('eed-cat-'))  s('eed-cat-').value  = e.category || 'case';
+  if (s('eed-date-')) s('eed-date-').value = e.date;
+  if (s('eed-note-')) s('eed-note-').value = e.notes || '';
+  if (s('eed-amt-'))  s('eed-amt-').focus();
+}
+
+function confirmEdit(id) {
+  const g = sfx => document.getElementById(sfx+id);
+  const v = parseFloat(g('eed-amt-') ? g('eed-amt-').value : '');
+  if (isNaN(v)||v<=0) { toast('Enter a valid time amount.'); return; }
+  const newHours = (g('eed-unit-')&&g('eed-unit-').value==='m') ? v/60 : v;
+  const newDate  = g('eed-date-') ? g('eed-date-').value : '';
+  if (!newDate) { toast('Enter a date.'); return; }
+  pushUndo();
+  saveEntries(loadEntries().map(e => {
+    if (e.id !== id) return e;
+    return { ...e, date: newDate, hours: Math.round(newHours*1000)/1000,
+      category: g('eed-cat-') ? g('eed-cat-').value : 'case',
+      notes: g('eed-note-') ? g('eed-note-').value.trim() : '' };
+  }));
+  openEditId = null; render(); toast('Entry updated');
+}
+
+function cancelEdit() { openEditId = null; renderLog(); renderByWeek(); }
+
+// ── Delete ────────────────────────────────────────────────────────────────────
+function deleteEntry(id) {
+  pushUndo();
+  saveEntries(loadEntries().filter(e => e.id !== id));
+  if (openAddId===id)  openAddId  = null;
+  if (openEditId===id) openEditId = null;
+  render(); toast('Entry removed');
+}
+
+function deleteUpdate(id) {
+  const cx = (loadUpdates().find(u => u.id===id)||{}).customer || CX;
+  pushUndo();
+  saveUpdates(loadUpdates().filter(u => u.id !== id));
+  renderProfile(); writeProfileFile(cx); toast('Update removed');
+}
+
+function clearCustomer() {
+  const cust = (loadCustomers()||[]).find(c => c.id===CX);
+  if (!confirm(`Delete all time entries for "${cust?.name||CX}"? Can be undone with Undo.`)) return;
+  pushUndo();
+  saveEntries(loadEntries().filter(e => e.customer !== CX));
+  openAddId = null; render(); toast('Cleared — ⌘Z to restore');
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportCSV() {
+  const cust = (loadCustomers()||[]).find(c => c.id===CX);
+  const name = slugify(cust ? cust.name : CX);
+  const rows = [['Date','Category','Hours (decimal)','Time','Notes'],
+    ...entries4().sort((a,b)=>b.date.localeCompare(a.date))
+      .map(e=>[e.date, catLabel(e.category||'case'), e.hours, fmtH(e.hours), '"'+(e.notes||'').replace(/"/g,'""')+'"'])];
+  dl(`dse-${name}-${today()}.csv`, 'text/csv', rows.map(r=>r.join(',')).join('\n'));
+}
+
+function exportWeek(wk) {
+  const we   = entries4().filter(e => isoWeek(e.date)===wk);
+  const wu   = updates4().filter(u => isoWeek(u.date)===wk);
+  const tots = { case:0, upgrade:0, meeting:0 };
+  we.forEach(e => { tots[e.category||'case'] = (tots[e.category||'case']||0)+e.hours; });
+  const total = tots.case+tots.upgrade+tots.meeting;
+  const cust  = (loadCustomers()||[]).find(c => c.id===CX);
+  const cname = cust ? cust.name : CX;
+
+  const lines = [
+    `Weekly Summary — ${cname}`, `Week of ${wk}`, `Generated ${today()}`, '',
+    'TIME BY CATEGORY',
+    `  Case Work:          ${fmtH(tots.case)}`,
+    `  Upgrade / Planning: ${fmtH(tots.upgrade)}`,
+    `  Customer Meetings:  ${fmtH(tots.meeting)}`,
+    `  ─────────────────────────────`,
+    `  Total:              ${fmtH(total)}`,
+  ];
+  if (wu.length) {
+    lines.push('', 'DSE UPDATES');
+    wu.sort((a,b)=>b.date.localeCompare(a.date)).forEach(u => {
+      lines.push('', `  ${u.date}`);
+      (u.notes||u.raw||'').split('\n').forEach(l => lines.push('  '+l));
+    });
+  }
+  if (we.length) {
+    lines.push('', 'TIME LOG');
+    we.sort((a,b)=>b.date.localeCompare(a.date)).forEach(e =>
+      lines.push(`  ${e.date}  ${fmtH(e.hours).padEnd(7)}  ${catLabel(e.category||'case').padEnd(18)}  ${e.notes||''}`)
+    );
+  }
+  dl(`dse-${slugify(cname)}-week-${wk}.txt`, 'text/plain', lines.join('\n'));
+}
+
+function dl(name, type, content) {
+  const a = document.createElement('a');
+  a.href = 'data:'+type+';charset=utf-8,'+encodeURIComponent(content);
+  a.download = name; a.click();
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  const ns = ['overview','log','by-week','profile'];
+  document.querySelectorAll('.tab').forEach((t,i)  => t.classList.toggle('active', ns[i]===name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id==='tab-'+name));
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function render() { renderOverview(); renderLog(); renderByWeek(); renderProfile(); }
+
+function renderOverview() {
+  const all = entries4(), now = new Date();
+  const ws  = (() => { const d=new Date(now); d.setDate(now.getDate()-now.getDay()); return d.toISOString().slice(0,10); })();
+  const ms  = today().slice(0,7);
+  const sum = f => all.filter(f).reduce((a,e)=>a+e.hours,0);
+  const caseH=sum(e=>(e.category||'case')==='case'), upgradeH=sum(e=>e.category==='upgrade'), meetingH=sum(e=>e.category==='meeting');
+  const weekH=sum(e=>e.date>=ws), monthH=sum(e=>e.date.startsWith(ms)), allH=sum(()=>true);
+  const col = `var(--cx-color)`;
+
+  document.getElementById('stat-cards').innerHTML = [
+    {l:'This Week',  v:fmtH(weekH),    s:'total',    col},
+    {l:'This Month', v:fmtH(monthH),   s:'total',    col},
+    {l:'All Time',   v:fmtH(allH),     s:'total',    col},
+    {l:'Case Work',  v:fmtH(caseH),    s:'all time', col:'var(--cat-case)'},
+    {l:'Upgrades',   v:fmtH(upgradeH), s:'all time', col:'var(--cat-upgrade)'},
+    {l:'Meetings',   v:fmtH(meetingH), s:'all time', col:'var(--cat-meeting)'},
+  ].map(c=>`<div class="card"><div class="cl">${c.l}</div><div class="cv" style="color:${c.col}">${c.v}</div><div class="cs">${c.s}</div></div>`).join('');
+
+  const days=[];
+  for(let i=29;i>=0;i--){const d=new Date(now);d.setDate(now.getDate()-i);days.push(d.toISOString().slice(0,10));}
+  const maxH = days.reduce((m,d)=>Math.max(m,all.filter(e=>e.date===d).reduce((a,e)=>a+e.hours,0)),0)||1;
+  const CHART_H = 120;
+
+  const yMax=Math.ceil(maxH*2)/2, yMid=Math.ceil(yMax/2*2)/2;
+  const yAxis=`<div class="tc-yaxis" style="height:${CHART_H+1}px">
+    ${[yMax,yMid,0].map(t=>`<span class="tc-ylabel">${fmtH(t)}</span>`).join('')}
+  </div>`;
+
+  const cols = days.map(d => {
+    const cs={case:0,upgrade:0,meeting:0};
+    all.filter(e=>e.date===d).forEach(e=>{cs[e.category||'case']+=e.hours;});
+    const total=cs.case+cs.upgrade+cs.meeting;
+    const px=v=>Math.round((v/(yMax||1))*CHART_H);
+    const label=d.slice(5);
+    const isZero=total===0;
+    const tip=isZero?'': `<div class="tc-tooltip"><strong>${d}</strong><br>
+      <span style="color:var(--cat-case)">■</span> Case: ${fmtH(cs.case)}<br>
+      <span style="color:var(--cat-upgrade)">■</span> Upgrade: ${fmtH(cs.upgrade)}<br>
+      <span style="color:var(--cat-meeting)">■</span> Meeting: ${fmtH(cs.meeting)}<br>
+      <strong>Total: ${fmtH(total)}</strong></div>`;
+    const segs=isZero?`<div class="tc-seg" style="height:2px;background:var(--border)"></div>`:[
+      cs.meeting>0?`<div class="tc-seg" style="height:${px(cs.meeting)}px;background:var(--cat-meeting)"></div>`:'',
+      cs.upgrade>0?`<div class="tc-seg" style="height:${px(cs.upgrade)}px;background:var(--cat-upgrade)"></div>`:'',
+      cs.case>0   ?`<div class="tc-seg" style="height:${px(cs.case)}px;background:var(--cat-case)"></div>`:'',
+    ].join('');
+    return `<div class="tc-col${isZero?' tc-zero':''}">${tip}
+      <div class="tc-bar-wrap" style="height:${CHART_H}px">${segs}</div>
+      <div class="tc-axis-line"></div><div class="tc-label">${label}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('chart-daily').innerHTML=
+    `<div class="timeline-chart"><div style="display:flex;align-items:flex-end">${yAxis}<div class="timeline-inner">${cols}</div></div></div>`;
+
+  const tot=caseH+upgradeH+meetingH||1;
+  document.getElementById('chart-cats').innerHTML=[
+    {l:'Case Work',         v:caseH,    c:'var(--cat-case)'},
+    {l:'Upgrade/Planning',  v:upgradeH, c:'var(--cat-upgrade)'},
+    {l:'Customer Meetings', v:meetingH, c:'var(--cat-meeting)'},
+  ].map(r=>`<div class="bar-row"><span class="bar-label-wide">${r.l}</span>
+    <div class="bar-track-h"><div class="bar-seg" style="width:${(r.v/tot*100).toFixed(1)}%;background:${r.c}"></div></div>
+    <span class="bar-val">${fmtH(r.v)}</span></div>`).join('');
+}
+
+function entryRows(rows) {
+  return rows.map(e => {
+    const addOpen=openAddId===e.id, editOpen=openEditId===e.id;
+    const main=`<tr>
+      <td>${e.date}</td>
+      <td><span class="${catCls(e.category)}">${catLabel(e.category||'case')}</span></td>
+      <td><span class="hbadge">${fmtH(e.hours)}</span></td>
+      <td class="ntd">${esc(e.notes||'')}</td>
+      <td><div class="acts">
+        <button class="btn-edit"    onclick="openEdit(${e.id})"    title="Edit">✎</button>
+        <button class="btn-addtime" onclick="openAddTime(${e.id})" title="Add time">+t</button>
+        <button class="btn-danger"  onclick="deleteEntry(${e.id})" title="Delete">✕</button>
+      </div></td></tr>`;
+
+    const editRow=editOpen?`<tr class="edit-tr"><td colspan="5"><div class="edit-form">
+      <div><label>Date</label><input type="date" id="eed-date-${e.id}" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')confirmEdit(${e.id})"></div>
+      <div><label>Category</label><select class="edit-cat" id="eed-cat-${e.id}">
+        <option value="case">Case Work</option><option value="upgrade">Upgrade / Planning</option><option value="meeting">Customer Meeting</option>
+      </select></div>
+      <div><label>Time</label><div class="edit-time-row">
+        <input type="number" id="eed-amt-${e.id}" min="1" step="1" placeholder="amt" onkeydown="if(event.key==='Enter')confirmEdit(${e.id})">
+        <select id="eed-unit-${e.id}"><option value="h">hrs</option><option value="m">min</option></select>
+      </div></div>
+      <div><label>Notes</label><textarea id="eed-note-${e.id}" placeholder="Optional" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')confirmEdit(${e.id})"></textarea></div>
+      <div style="padding-top:17px;display:flex;gap:4px">
+        <button class="btn-save-edit" onclick="confirmEdit(${e.id})">Save</button>
+        <button class="btn-canc" onclick="cancelEdit()">✕</button>
+      </div></div></td></tr>`:'';
+
+    const addRow=addOpen?`<tr class="at-tr"><td colspan="5"><div class="at-form">
+      <div><label>Add time</label><div class="at-time-row">
+        <input type="number" id="ath-${e.id}" min="1" step="1" placeholder="amt" onkeydown="if(event.key==='Enter')confirmAddTime(${e.id})">
+        <select id="atu-${e.id}"><option value="h">hrs</option><option value="m">min</option></select>
+      </div></div>
+      <div><label>Append note</label><textarea id="atn-${e.id}" placeholder="Optional" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')confirmAddTime(${e.id})"></textarea></div>
+      <div style="padding-top:17px;display:flex;gap:4px">
+        <button class="btn-conf" onclick="confirmAddTime(${e.id})">Save</button>
+        <button class="btn-canc" onclick="cancelAddTime()">✕</button>
+      </div></div></td></tr>`:'';
+
+    return main+editRow+addRow;
+  }).join('');
+}
+
+function renderLog() {
+  const sorted=entries4().sort((a,b)=>b.date.localeCompare(a.date));
+  const el=document.getElementById('log-table');
+  if(!sorted.length){el.innerHTML='<div class="empty"><strong>No time entries yet.</strong><p>Use "Log Time" on the left to get started.</p></div>';return;}
+  el.innerHTML=`<table><thead><tr><th>Date</th><th>Category</th><th>Time</th><th>Notes</th><th></th></tr></thead><tbody>${entryRows(sorted)}</tbody></table>`;
+}
+
+function renderByWeek() {
+  const sorted=entries4().sort((a,b)=>b.date.localeCompare(a.date));
+  const el=document.getElementById('week-table');
+  if(!sorted.length){el.innerHTML='<div class="empty"><strong>No time entries yet.</strong></div>';return;}
+  const weeks={};
+  sorted.forEach(e=>{const wk=isoWeek(e.date);(weeks[wk]=weeks[wk]||[]).push(e);});
+  const rows=[];
+  for(const wk of Object.keys(weeks).sort().reverse()){
+    const we=weeks[wk], tots={case:0,upgrade:0,meeting:0};
+    we.forEach(e=>{tots[e.category||'case']=(tots[e.category||'case']||0)+e.hours;});
+    const total=tots.case+tots.upgrade+tots.meeting;
+    rows.push(`<tr class="wk-hdr"><td colspan="5"><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+      <span>Week of ${wk}</span>
+      <span style="color:var(--cat-case)">${fmtH(tots.case)} case</span>
+      <span style="color:var(--cat-upgrade)">${fmtH(tots.upgrade)} upgrade</span>
+      <span style="color:var(--cat-meeting)">${fmtH(tots.meeting)} meetings</span>
+      <strong style="margin-left:auto">${fmtH(total)} total</strong>
+      <button class="btn-ghost btn-sm" onclick="exportWeek('${wk}')">Export Week</button>
+    </div></td></tr>`);
+    rows.push(entryRows(we.sort((a,b)=>b.date.localeCompare(a.date))));
+  }
+  el.innerHTML=`<table><thead><tr><th>Date</th><th>Category</th><th>Time</th><th>Notes</th><th></th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+
+function renderProfile() {
+  renderProfileFilebar();
+  const feed=updates4().sort((a,b)=>b.date.localeCompare(a.date));
+  const el=document.getElementById('profile-feed');
+  if(!feed.length){
+    el.innerHTML='<div class="empty"><strong>No updates yet.</strong><p style="margin-top:5px;font-size:12px">Paste a DSE Update in the left panel to build your profile.</p></div>';
+    return;
+  }
+  el.innerHTML=`<div class="feed">${feed.map(u=>`
+    <div class="feed-item">
+      <div class="feed-header"><span class="feed-date-label">${u.date}</span>
+        <button class="feed-del" onclick="deleteUpdate(${u.id})" title="Remove">✕</button></div>
+      <div class="feed-body">${esc(u.notes||u.raw||'')}</div>
+    </div>`).join('')}</div>`;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+initCustomers();
+document.getElementById('modal-root').style.display = 'none';
+document.getElementById('in-date').value = today();
+const firstCx = (loadCustomers()||[])[0];
+if (firstCx) setCustomer(firstCx.id);
+</script>
+</body>
+</html>
