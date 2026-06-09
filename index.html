@@ -1173,10 +1173,14 @@ function renderStatus() {
         <a href="https://console.anthropic.com/settings/keys" target="_blank" class="btn-ghost" style="text-decoration:none;font-size:12px;padding:5px 11px">Get key ↗</a>
       </div>`;
 
+  const evalBtn = `<button class="btn-evaluate" id="btn-evaluate" onclick="evaluateStatus()" style="width:100%;margin-bottom:16px;justify-content:center">
+    ↻ Re-evaluate with Claude
+  </button>`;
+
   if (!updates.length) {
     el.innerHTML = keyBar + `<div class="status-no-data">
       <strong>No profile updates yet</strong>
-      <p>Add DSE updates in the Profile tab, then click Re-evaluate to generate the status dashboard.</p>
+      <p>Add DSE updates in the Profile tab, then come back here to generate the status dashboard.</p>
     </div>`;
     return;
   }
@@ -1187,17 +1191,16 @@ function renderStatus() {
     ? `Last evaluated ${new Date(status.evaluated_at).toLocaleString()}`
     : `${updates.length} update${updates.length===1?'':'s'} — not yet evaluated`;
 
-  const topbar = `<div class="status-topbar">
-    ${status ? `<div class="health-badge ${healthClass}"><span class="health-dot"></span>${healthLabel}</div>` : ''}
-    ${status ? `<span style="font-size:13px;color:var(--muted)">${esc(status.health_reason||'')}</span>` : ''}
+  const topbar = status ? `<div class="status-topbar" style="margin-bottom:12px">
+    <div class="health-badge ${healthClass}"><span class="health-dot"></span>${healthLabel}</div>
+    <span style="font-size:13px;color:var(--muted);flex:1">${esc(status.health_reason||'')}</span>
     <span class="status-evaluated">${evalTime}</span>
-    <button class="btn-evaluate" id="btn-evaluate" onclick="evaluateStatus()">↻ Re-evaluate</button>
-  </div>`;
+  </div>` : `<p style="font-size:12px;color:var(--muted);margin-bottom:12px">${evalTime}</p>`;
 
   if (!status) {
-    el.innerHTML = keyBar + topbar + `<div class="status-no-data">
+    el.innerHTML = keyBar + evalBtn + topbar + `<div class="status-no-data" style="padding:24px 16px">
       <strong>Ready to analyze</strong>
-      <p>Click Re-evaluate to have Claude analyze the ${updates.length} profile update${updates.length===1?'':'s'} for ${custName} and build the status dashboard.</p>
+      <p>Click the button above to have Claude analyze the ${updates.length} profile update${updates.length===1?'':'s'} for ${custName}.</p>
     </div>`;
     return;
   }
@@ -1210,7 +1213,7 @@ function renderStatus() {
         : `<ul class="status-list ${cls}">${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`}
     </div>`;
 
-  el.innerHTML = keyBar + topbar +
+  el.innerHTML = keyBar + evalBtn + topbar +
     `<div class="status-summary">${esc(status.summary||'')}</div>
     <div class="status-grid">
       ${section('Open To-Dos',          '✅', status.todos,            's-todo', 'No open to-dos')}
