@@ -176,13 +176,14 @@
   .pp-btns button { flex: 1; margin-top: 0; }
 
   /* ── File link banner ── */
-  .file-link-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(34,197,94,.07); border: 1px solid rgba(34,197,94,.2); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 14px; font-size: 12px; }
-  .file-link-bar.linked { background: rgba(34,197,94,.05); border-color: rgba(34,197,94,.15); }
-  .file-link-status { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-  .file-link-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
-  .file-link-status.linked .dot { background: var(--green); }
-  .file-link-status.linked { color: var(--green); }
-  .btn-link-file { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+  /* ── Directory sync banner (replaces old per-file link bar) ── */
+  .dir-bar { display: flex; align-items: center; gap: 10px; border-radius: var(--radius); padding: 9px 13px; margin-bottom: 14px; font-size: 12px; border: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; }
+  .dir-bar.linked { border-color: rgba(34,197,94,.25); background: rgba(34,197,94,.04); }
+  .dir-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+  .dir-bar.linked .dir-dot { background: var(--green); }
+  .dir-bar-label { flex: 1; color: var(--muted); }
+  .dir-bar.linked .dir-bar-label { color: var(--text); }
+  .btn-pick-dir { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); padding: 4px 10px; font-size: 12px; white-space: nowrap; }
 
   /* ── Settings modal ── */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 1000; display: flex; align-items: center; justify-content: center; }
@@ -368,7 +369,7 @@
     </div>
 
     <div class="tab-pane" id="tab-profile">
-      <div id="profile-file-bar"></div>
+      <div id="profile-dir-bar"></div>
       <div id="profile-feed"></div>
     </div>
 
@@ -391,7 +392,7 @@ const UKEY = 'dse_updates_v2';
 const loadCustomers = () => { try { return JSON.parse(localStorage.getItem(CKEY)) || null; } catch { return null; } };
 const saveCustomers = d => localStorage.setItem(CKEY, JSON.stringify(d));
 const loadEntries   = () => { try { return JSON.parse(localStorage.getItem(EKEY)) || []; } catch { return []; } };
-const saveEntries   = d => localStorage.setItem(EKEY, JSON.stringify(d));
+const saveEntries   = d => { localStorage.setItem(EKEY, JSON.stringify(d)); _scheduleFileWrite(); };
 const loadUpdates   = () => { try { return JSON.parse(localStorage.getItem(UKEY)) || []; } catch { return []; } };
 const saveUpdates   = d => localStorage.setItem(UKEY, JSON.stringify(d));
 
@@ -428,70 +429,170 @@ function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'customer';
 }
 
-// ── File System Access ────────────────────────────────────────────────────────
-const fileHandles  = {};
-const FS_SUPPORTED = ('showOpenFilePicker' in window);
+// ── File write scheduler (debounce rapid mutations) ──────────────────────────
+let _writeTimer = null;
+function _scheduleFileWrite(cx) {
+  clearTimeout(_writeTimer);
+  _writeTimer = setTimeout(() => { writeCustomerFiles(cx || CX); }, 400);
+}
 
-async function linkProfileFile(cx) {
-  if (!FS_SUPPORTED) { toast('File System Access not supported — use Chrome or Edge.'); return; }
+// ── Directory-based file sync ─────────────────────────────────────────────────
+// One directory handle stored in IndexedDB per session key.
+// Writes {slug}-profile.md and {slug}-timelog.csv for every customer.
+
+const FS_SUPPORTED = ('showDirectoryPicker' in window);
+const IDB_NAME     = 'dse_tracker_fs';
+const IDB_STORE    = 'handles';
+const IDB_KEY      = 'dir_handle';
+let   dirHandle    = null;   // in-memory once loaded
+
+// ── IndexedDB helpers ─────────────────────────────────────────────────────────
+function openIDB() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    req.onsuccess = e => res(e.target.result);
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+async function idbGet(key) {
+  const db = await openIDB();
+  return new Promise((res, rej) => {
+    const tx  = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => res(req.result);
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await openIDB();
+  return new Promise((res, rej) => {
+    const tx  = db.transaction(IDB_STORE, 'readwrite');
+    const req = tx.objectStore(IDB_STORE).put(val, key);
+    req.onsuccess = () => res();
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+async function idbDel(key) {
+  const db = await openIDB();
+  return new Promise((res, rej) => {
+    const tx  = db.transaction(IDB_STORE, 'readwrite');
+    const req = tx.objectStore(IDB_STORE).delete(key);
+    req.onsuccess = () => res();
+    req.onerror   = e => rej(e.target.error);
+  });
+}
+
+// Load persisted handle and re-request permission if needed (called at boot)
+async function initDirHandle() {
   try {
-    const [handle] = await window.showOpenFilePicker({
-      id: 'dse-profile',
-      startIn: 'documents',
-      types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }],
-    });
-    fileHandles[cx] = handle;
-    renderProfileFilebar();
-    await writeProfileFile(cx);
-    toast(`Linked ${handle.name} — auto-syncing`);
+    const saved = await idbGet(IDB_KEY);
+    if (!saved) return;
+    // Check/request permission without prompting (queryPermission)
+    const perm = await saved.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') { dirHandle = saved; renderDirBar(); }
+    else { dirHandle = saved; renderDirBar(); } // show "click to re-grant"
+  } catch { /* IDB or handle gone */ }
+}
+
+async function pickDirectory() {
+  if (!FS_SUPPORTED) { toast('Directory picker not supported — use Chrome or Edge.'); return; }
+  try {
+    const h = await window.showDirectoryPicker({ id: 'dse-tracker', mode: 'readwrite', startIn: 'documents' });
+    dirHandle = h;
+    await idbSet(IDB_KEY, h);
+    renderDirBar();
+    renderSettingsModal();
+    await writeAllFiles();
+    toast(`Folder linked: ${h.name} — auto-syncing all customers`);
   } catch (e) {
-    if (e.name !== 'AbortError') toast('Could not link file: ' + e.message);
+    if (e.name !== 'AbortError') toast('Could not open folder: ' + e.message);
   }
 }
 
+async function unlinkDirectory() {
+  dirHandle = null;
+  await idbDel(IDB_KEY);
+  renderDirBar();
+  renderSettingsModal();
+  toast('Folder unlinked');
+}
+
+// Ensure we have write permission (may show browser permission prompt)
+async function ensurePermission() {
+  if (!dirHandle) return false;
+  const perm = await dirHandle.queryPermission({ mode: 'readwrite' });
+  if (perm === 'granted') return true;
+  const req = await dirHandle.requestPermission({ mode: 'readwrite' });
+  return req === 'granted';
+}
+
+// Write a single file into the linked directory
+async function writeFile(filename, content) {
+  if (!dirHandle) return;
+  if (!(await ensurePermission())) { toast('Permission denied — re-link folder in Settings.'); return; }
+  try {
+    const fh = await dirHandle.getFileHandle(filename, { create: true });
+    const w  = await fh.createWritable();
+    await w.write(content);
+    await w.close();
+  } catch (e) {
+    toast(`Write failed (${filename}): ` + e.message);
+  }
+}
+
+// ── Content builders ──────────────────────────────────────────────────────────
 function buildProfileMarkdown(cx) {
   const cust    = (loadCustomers() || []).find(c => c.id === cx);
   const cname   = cust ? cust.name : cx;
   const updates = loadUpdates().filter(u => u.customer === cx).sort((a,b) => b.date.localeCompare(a.date));
   const lines   = [`# ${cname} — DSE Profile`, ``, `*Last updated: ${new Date().toLocaleString()}*`, ``, `---`, ``];
-  if (!updates.length) {
-    lines.push('*No updates yet.*');
-  } else {
-    updates.forEach(u => {
-      lines.push(`## ${u.date}`, ``);
-      lines.push((u.notes || u.raw || '').trim(), ``, `---`, ``);
-    });
-  }
+  if (!updates.length) { lines.push('*No updates yet.*'); }
+  else { updates.forEach(u => { lines.push(`## ${u.date}`, ``, (u.notes || u.raw || '').trim(), ``, `---`, ``); }); }
   return lines.join('\n');
 }
 
-async function writeProfileFile(cx) {
-  const handle = fileHandles[cx];
-  if (!handle) return;
-  try {
-    const w = await handle.createWritable();
-    await w.write(buildProfileMarkdown(cx));
-    await w.close();
-  } catch (e) {
-    if (e.name === 'NotAllowedError') { fileHandles[cx] = null; renderProfileFilebar(); }
-    toast('File write failed: ' + e.message);
-  }
+function buildTimelogCSV(cx) {
+  const rows = [['Date','Category','Hours (decimal)','Time','Notes'],
+    ...loadEntries().filter(e => e.customer === cx).sort((a,b) => b.date.localeCompare(a.date))
+      .map(e => [e.date, catLabel(e.category||'case'), e.hours, fmtH(e.hours), '"'+(e.notes||'').replace(/"/g,'""')+'"'])];
+  return rows.map(r => r.join(',')).join('\n');
 }
 
-function renderProfileFilebar() {
-  const el = document.getElementById('profile-file-bar');
+// Write both files for one customer
+async function writeCustomerFiles(cx) {
+  if (!dirHandle) return;
+  const cust = (loadCustomers()||[]).find(c => c.id === cx);
+  const slug = slugify(cust ? cust.name : cx);
+  await Promise.all([
+    writeFile(`${slug}-profile.md`,  buildProfileMarkdown(cx)),
+    writeFile(`${slug}-timelog.csv`, buildTimelogCSV(cx)),
+  ]);
+}
+
+// Write files for all customers
+async function writeAllFiles() {
+  const customers = loadCustomers() || [];
+  await Promise.all(customers.map(c => writeCustomerFiles(c.id)));
+}
+
+// ── Dir bar (shown in Profile tab) ───────────────────────────────────────────
+function renderDirBar() {
+  const el = document.getElementById('profile-dir-bar');
   if (!el) return;
-  const handle  = fileHandles[CX];
-  const linked  = !!handle;
-  const cust    = (loadCustomers() || []).find(c => c.id === CX);
-  const fname   = linked ? handle.name : (slugify(cust ? cust.name : CX) + '-profile.md');
-  el.innerHTML  = `<div class="file-link-bar${linked ? ' linked' : ''}">
-    <div class="file-link-status${linked ? ' linked' : ''}">
-      <span class="dot"></span>
-      ${linked ? `Auto-syncing to <strong style="margin-left:3px">${fname}</strong>` : `Link <strong style="margin:0 3px">${fname}</strong> to enable auto-sync`}
-    </div>
-    <button class="btn-link-file" onclick="linkProfileFile('${CX}')">${linked ? 'Re-link' : 'Link File'}</button>
-  </div>`;
+  const linked = !!dirHandle;
+  el.innerHTML = linked
+    ? `<div class="dir-bar linked">
+        <span class="dir-dot"></span>
+        <span class="dir-bar-label">Syncing to <strong>${dirHandle.name}/</strong> &nbsp;·&nbsp; writes <code>{customer}-profile.md</code> and <code>{customer}-timelog.csv</code></span>
+        <button class="btn-pick-dir" onclick="pickDirectory()">Change</button>
+        <button class="btn-ghost btn-sm" onclick="unlinkDirectory()" style="font-size:12px">Unlink</button>
+      </div>`
+    : `<div class="dir-bar">
+        <span class="dir-dot"></span>
+        <span class="dir-bar-label">No folder linked — profiles and timelogs won't be saved to disk</span>
+        <button class="btn-pick-dir" onclick="pickDirectory()">Choose Folder</button>
+      </div>`;
 }
 
 // ── Undo stack ────────────────────────────────────────────────────────────────
@@ -644,6 +745,37 @@ function renderSettingsModal() {
         </div>
         <button class="btn-primary" onclick="addCustomer()">Add</button>
       </div>
+
+      <hr class="modal-divider">
+      <div class="modal-section-label">Data &amp; files</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.5">
+        Link a folder on disk. The app writes <code>{customer}-profile.md</code> and
+        <code>{customer}-timelog.csv</code> there automatically on every change.
+        ${!FS_SUPPORTED ? '<br><strong style="color:var(--yellow)">⚠ Requires Chrome or Edge.</strong>' : ''}
+      </p>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg)">
+        <span style="font-size:13px;flex:1">
+          ${dirHandle
+            ? `<span style="color:var(--green)">●</span> <strong>${dirHandle.name}/</strong> linked`
+            : `<span style="color:var(--muted)">○</span> No folder linked`}
+        </span>
+        <button class="btn-pick-dir" onclick="pickDirectory()">
+          ${dirHandle ? 'Change Folder' : 'Choose Folder'}
+        </button>
+        ${dirHandle ? `<button class="btn-ghost btn-sm" onclick="unlinkDirectory()" style="font-size:12px">Unlink</button>` : ''}
+      </div>
+      ${dirHandle ? `
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">
+        ${(loadCustomers()||[]).map(c => {
+          const slug = slugify(c.name);
+          return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)">
+            <span class="cx-swatch" style="background:${c.color};width:10px;height:10px;border-radius:2px"></span>
+            <span style="flex:1">${esc(c.name)}</span>
+            <code>${slug}-profile.md</code>
+            <code style="margin-left:4px">${slug}-timelog.csv</code>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
     </div>
   </div>`;
   setTimeout(() => document.getElementById('new-cx-name')?.focus(), 50);
@@ -723,7 +855,7 @@ function saveUpdate() {
   saveUpdates(updates);
   cancelUpdate();
   renderProfile();
-  writeProfileFile(CX);
+  writeCustomerFiles(CX);
   toast('Update saved to profile');
 }
 
@@ -828,7 +960,7 @@ function deleteUpdate(id) {
   const cx = (loadUpdates().find(u => u.id===id)||{}).customer || CX;
   pushUndo();
   saveUpdates(loadUpdates().filter(u => u.id !== id));
-  renderProfile(); writeProfileFile(cx); toast('Update removed');
+  renderProfile(); writeCustomerFiles(cx); toast('Update removed');
 }
 
 function clearCustomer() {
@@ -1230,7 +1362,7 @@ function renderByWeek() {
 }
 
 function renderProfile() {
-  renderProfileFilebar();
+  renderDirBar();
   const feed=updates4().sort((a,b)=>b.date.localeCompare(a.date));
   const el=document.getElementById('profile-feed');
   if(!feed.length){
@@ -1251,6 +1383,7 @@ document.getElementById('modal-root').style.display = 'none';
 document.getElementById('in-date').value = today();
 const firstCx = (loadCustomers()||[])[0];
 if (firstCx) setCustomer(firstCx.id);
+initDirHandle().then(() => renderDirBar());
 </script>
 </body>
 </html>
